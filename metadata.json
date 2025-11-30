@@ -1,0 +1,7 @@
+{
+  "name": "StyleConfident AI",
+  "description": "Your personal AI stylist that curates confidence-boosting outfits from your own wardrobe or recommends the perfect new pieces based on your unique features and occasion.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

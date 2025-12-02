@@ -25,9 +25,8 @@ const ProfileForm: React.FC<Props> = ({ profile, onSave, onNext }) => {
     reader.onloadend = async () => {
       try {
         const base64String = (reader.result as string).split(',')[1];
-        // Use Vite env var or fallback to empty string to prevent crashes
-        const apiKey = (import.meta as any).env.VITE_API_KEY || '';
-        const analysis = await analyzeUserProfileFromImage(apiKey, base64String, file.type);
+        // Service now handles API key internally via import.meta.env
+        const analysis = await analyzeUserProfileFromImage(base64String, file.type);
         
         onSave({
           ...profile,

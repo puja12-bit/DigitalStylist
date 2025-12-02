@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { WardrobeItem } from '../types';
 import { analyzeWardrobeFromImage } from '../services/geminiService';
@@ -43,8 +42,8 @@ const WardrobeManager: React.FC<Props> = ({ items, onUpdate, onNext, onBack }) =
     reader.onloadend = async () => {
       try {
         const base64String = (reader.result as string).split(',')[1];
-        const apiKey = process.env.API_KEY || ''; // Assuming env is available
-        const newItems = await analyzeWardrobeFromImage(apiKey, base64String, file.type);
+        // Service now handles API key internally
+        const newItems = await analyzeWardrobeFromImage(base64String, file.type);
         onUpdate([...items, ...newItems]);
       } catch (error) {
         console.error("Failed to analyze wardrobe image", error);

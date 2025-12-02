@@ -38,8 +38,6 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  const API_KEY = (import.meta as any).env.VITE_API_KEY || '';
-
   // Theme Logic
   useEffect(() => {
     const storedTheme = localStorage.getItem('styleConfident_theme') as 'light' | 'dark' | null;
@@ -193,12 +191,8 @@ const App: React.FC = () => {
     setRecommendation(null);
     
     try {
-      if (!API_KEY) {
-        throw new Error("System Error: API Key is missing. Please contact support or check configuration.");
-      }
-      
       // 1. Generate Text Recommendation
-      const result = await generateOutfit(API_KEY, profile, wardrobe, occasion);
+      const result = await generateOutfit(profile, wardrobe, occasion);
       setRecommendation(result);
       setView('result');
       
@@ -207,7 +201,7 @@ const App: React.FC = () => {
       
       // 2. Start Visual (2D default) in background
       setIsGenerating2D(true);
-      generateOutfitImage(API_KEY, result, profile, '2D')
+      generateOutfitImage(result, profile, '2D')
         .then((imageResult) => {
            setGeneratedImage(imageResult);
            // 3. Save to History only after we have the initial image
@@ -224,11 +218,19 @@ const App: React.FC = () => {
   };
 
   const handleGenerateReal = async () => {
-      if (!recommendation || !API_KEY || !user) return;
+      if (!recommendation || !user) return;
       if (generatedImageReal) return;
 
       try {
-        const realImage = await generateOutfitImage(API_KEY, recommendation, profile, 'REAL');
+        // API Key Selection for Gemini 3 Pro models
+        if (window.aistudio) {
+            const hasKey = await window.aistudio.hasSelectedApiKey();
+            if (!hasKey) {
+                await window.aistudio.openSelectKey();
+            }
+        }
+
+        const realImage = await generateOutfitImage(recommendation, profile, 'REAL');
         setGeneratedImageReal(realImage);
         
         // Update history entry with the real image

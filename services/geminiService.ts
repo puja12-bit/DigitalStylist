@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type, ImageGenerationConfig } from "@google/genai";
 import { UserProfile, WardrobeItem, OutfitRecommendation, SkinTone } from "../types";
 
 // Helper to sanitize the response text into valid JSON
@@ -16,13 +16,15 @@ const fileToPart = (base64Data: string, mimeType: string) => {
 };
 
 export const analyzeUserProfileFromImage = async (
-  apiKey: string,
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("API Key is missing");
+  
   const ai = new GoogleGenAI({ apiKey });
 
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       gender: { type: Type.STRING, enum: ["Male", "Female", "Non-Binary"] },
@@ -68,13 +70,15 @@ export const analyzeUserProfileFromImage = async (
 };
 
 export const analyzeWardrobeFromImage = async (
-  apiKey: string,
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("API Key is missing");
+
   const ai = new GoogleGenAI({ apiKey });
 
-  const schema: Schema = {
+  const schema = {
     type: Type.ARRAY,
     items: {
       type: Type.OBJECT,
@@ -118,16 +122,18 @@ export const analyzeWardrobeFromImage = async (
 };
 
 export const generateOutfit = async (
-  apiKey: string,
   profile: UserProfile,
   wardrobe: WardrobeItem[],
   occasion: string
 ): Promise<OutfitRecommendation> => {
   
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("API Key is missing");
+
   const ai = new GoogleGenAI({ apiKey });
 
   // Define the schema for the output
-  const itemSchema: Schema = {
+  const itemSchema = {
     type: Type.OBJECT,
     properties: {
       name: { type: Type.STRING, description: "Name of the item (e.g., White Linen Shirt)" },
@@ -139,7 +145,7 @@ export const generateOutfit = async (
     required: ["name", "description", "color", "source", "reasoning"]
   };
 
-  const responseSchema: Schema = {
+  const responseSchema = {
     type: Type.OBJECT,
     properties: {
       top: itemSchema,
@@ -156,9 +162,9 @@ export const generateOutfit = async (
 
   const wardrobeList = wardrobe.map(w => `- ${w.color} ${w.name} (${w.category})`).join("\n");
 
+  const systemInstruction = "You are a world-class fashion stylist specializing in color theory, body types, and confidence coaching.";
+
   const prompt = `
-    You are a world-class fashion stylist specializing in color theory, body types, and confidence coaching.
-    
     User Profile:
     - Gender: ${profile.gender}
     - Height: ${profile.heightCm}cm
@@ -188,6 +194,7 @@ export const generateOutfit = async (
       model: "gemini-2.5-flash",
       contents: prompt,
       config: {
+        systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: responseSchema,
         temperature: 0.4, 
@@ -206,15 +213,19 @@ export const generateOutfit = async (
 };
 
 export const generateOutfitImage = async (
-  apiKey: string,
   recommendation: OutfitRecommendation,
   profile: UserProfile,
   style: '2D' | 'REAL' = '2D'
 ): Promise<string | null> => {
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (!apiKey) throw new Error("API Key is missing");
+
   const ai = new GoogleGenAI({ apiKey });
 
   let prompt = "";
   const parts: any[] = [];
+  let model = "gemini-2.5-flash-image";
+  let imageConfig: ImageGenerationConfig | undefined = undefined;
 
   const outfitDescription = `
     Top: ${recommendation.top.color} ${recommendation.top.name} - ${recommendation.top.description}
@@ -225,6 +236,8 @@ export const generateOutfitImage = async (
   `;
 
   if (style === 'REAL') {
+    model = "gemini-3-pro-image-preview";
+    imageConfig = { imageSize: "1K" };
     prompt = `
       Generate a photorealistic, 4K, cinematic, high-quality full-body image of a person matching the description below wearing this exact outfit.
       
@@ -242,7 +255,7 @@ export const generateOutfitImage = async (
     `;
 
     if (profile.avatarImage) {
-      parts.push(fileToPart(profile.avatarImage, 'image/jpeg')); // Assuming jpeg for simplicity, or we could pass mime type
+      parts.push(fileToPart(profile.avatarImage, 'image/jpeg')); // Assuming jpeg for simplicity
     }
 
   } else {
@@ -265,8 +278,9 @@ export const generateOutfitImage = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
+      model: model,
       contents: { parts: parts },
+      config: imageConfig ? { imageConfig } : undefined,
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {

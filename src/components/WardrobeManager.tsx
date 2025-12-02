@@ -42,9 +42,8 @@ const WardrobeManager: React.FC<Props> = ({ items, onUpdate, onNext, onBack }) =
     reader.onloadend = async () => {
       try {
         const base64String = (reader.result as string).split(',')[1];
-        // Correct env var access for Vite
-        const apiKey = (import.meta as any).env.VITE_API_KEY || ''; 
-        const newItems = await analyzeWardrobeFromImage(apiKey, base64String, file.type);
+        // Service now handles API key internally
+        const newItems = await analyzeWardrobeFromImage(base64String, file.type);
         onUpdate([...items, ...newItems]);
       } catch (error) {
         console.error("Failed to analyze wardrobe image", error);

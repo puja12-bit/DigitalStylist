@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { UserProfile, SkinTone } from '../types';
 import { analyzeUserProfileFromImage } from '../services/geminiService';
@@ -26,8 +25,8 @@ const ProfileForm: React.FC<Props> = ({ profile, onSave, onNext }) => {
     reader.onloadend = async () => {
       try {
         const base64String = (reader.result as string).split(',')[1];
-        const apiKey = process.env.API_KEY || '';
-        const analysis = await analyzeUserProfileFromImage(apiKey, base64String, file.type);
+        // API key is handled internally by the service
+        const analysis = await analyzeUserProfileFromImage(base64String, file.type);
         
         onSave({
           ...profile,

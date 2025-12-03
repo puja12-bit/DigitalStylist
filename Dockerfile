@@ -28,7 +28,7 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Cloud Run expects the container to listen on port 8080
 EXPOSE 8080
-
 # Start Nginx
 CMD ["nginx", "-g", "daemon off;"]
+
 

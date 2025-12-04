@@ -1,0 +1,37 @@
+steps:
+  # Build the container image and pass the API key as a build argument
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '--build-arg',
+      'VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}',
+      '-t',
+      'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA',
+      '.'
+    ]
+
+  # Push the image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA']
+
+  # Deploy container to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'style-confident-ai' # Ensure this matches your Service Name
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1' # Change if you use a different region
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+# Define the substitution variable (so it can be set in the Trigger UI)
+substitutions:
+  _VITE_GEMINI_API_KEY: 'PLACEHOLDER_VALUE_WILL_BE_OVERRIDDEN'
+
+images:
+  - 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA'

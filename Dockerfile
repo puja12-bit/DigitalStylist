@@ -4,16 +4,16 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
 
-# --- CRITICAL CHANGE START ---
-# Define the argument (variable) that will be passed during build
+# --- FIX: FORCE KEY INTO FILE ---
+# Accept the argument from Cloud Build
 ARG VITE_GEMINI_API_KEY
 
-# Set it as an environment variable so the 'npm run build' process can see it
-ENV VITE_GEMINI_API_KEY=$VITE_GEMINI_API_KEY
-# --- CRITICAL CHANGE END ---
+# Write it directly to a .env file so Vite is GUARANTEED to see it
+RUN echo "VITE_GEMINI_API_KEY=$VITE_GEMINI_API_KEY" > .env
+# -------------------------------
 
 COPY . .
-# Now when Vite builds, it will see the key and bake it in
+# Build the app
 RUN npm run build || true
 
 # Stage 2: Serve

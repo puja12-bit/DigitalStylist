@@ -25,13 +25,12 @@ const ProfileForm: React.FC<Props> = ({ profile, onSave, onNext }) => {
     reader.onloadend = async () => {
       try {
         const base64String = (reader.result as string).split(',')[1];
-        // Service now handles API key internally via import.meta.env
         const analysis = await analyzeUserProfileFromImage(base64String, file.type);
         
         onSave({
           ...profile,
           ...analysis,
-          avatarImage: base64String // Save for later "Real" generation
+          avatarImage: base64String 
         });
       } catch (error) {
         console.error("Failed to analyze image", error);

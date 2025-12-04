@@ -1,4 +1,3 @@
-
 export enum SkinTone {
   Fair = 'Fair',
   Light = 'Light',
@@ -25,19 +24,19 @@ export interface User {
 }
 
 export interface UserProfile {
-  userId?: string; // Added for Backend Link
+  userId?: string; 
   name: string;
   heightCm: number;
   weightKg: number;
   skinTone: SkinTone;
   facialFeatures: string; 
   gender: string;
-  avatarImage?: string; // Base64 string of the user's photo
+  avatarImage?: string; 
 }
 
 export interface WardrobeItem {
   id: string;
-  userId?: string; // Added for Backend Link
+  userId?: string; 
   name: string;
   category: 'Top' | 'Bottom' | 'Shoes' | 'Accessory' | 'Outerwear';
   color: string;
@@ -64,7 +63,7 @@ export interface OutfitRecommendation {
 
 export interface HistoryEntry {
   id: string;
-  userId?: string; // Added for Backend Link
+  userId?: string; 
   timestamp: number;
   occasion: string;
   recommendation: OutfitRecommendation;
@@ -79,8 +78,8 @@ export interface AppState {
   wardrobe: WardrobeItem[];
   occasion: string;
   recommendation: OutfitRecommendation | null;
-  generatedImage: string | null; // The 2D Sketch
-  generatedImageReal: string | null; // The Photorealistic Image
+  generatedImage: string | null; 
+  generatedImageReal: string | null; 
   history: HistoryEntry[];
   isLoading: boolean;
   error: string | null;

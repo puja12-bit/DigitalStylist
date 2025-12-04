@@ -19,10 +19,7 @@ export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-  
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const schema = {
     type: Type.OBJECT,
@@ -73,10 +70,7 @@ export const analyzeWardrobeFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const schema = {
     type: Type.ARRAY,
@@ -127,12 +121,8 @@ export const generateOutfit = async (
   occasion: string
 ): Promise<OutfitRecommendation> => {
   
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const ai = new GoogleGenAI({ apiKey });
-
-  // Define the schema for the output
   const itemSchema = {
     type: Type.OBJECT,
     properties: {
@@ -217,10 +207,7 @@ export const generateOutfitImage = async (
   profile: UserProfile,
   style: '2D' | 'REAL' = '2D'
 ): Promise<string | null> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   let prompt = "";
   const parts: any[] = [];
@@ -230,4 +217,67 @@ export const generateOutfitImage = async (
   const outfitDescription = `
     Top: ${recommendation.top.color} ${recommendation.top.name} - ${recommendation.top.description}
     Bottom: ${recommendation.bottom.color} ${recommendation.bottom.name} - ${recommendation.bottom.description}
-    Shoes: ${recommend
+    Shoes: ${recommendation.shoes.color} ${recommendation.shoes.name}
+    Accessory: ${recommendation.accessory.name}
+    Hairstyle: ${recommendation.hairstyle}
+  `;
+
+  if (style === 'REAL') {
+    model = "gemini-3-pro-image-preview";
+    imageConfig = { imageSize: "1K" };
+    prompt = `
+      Generate a photorealistic, 4K, cinematic, high-quality full-body image of a person matching the description below wearing this exact outfit.
+      
+      Outfit:
+      ${outfitDescription}
+
+      Model Features:
+      Gender: ${profile.gender}
+      Skin Tone: ${profile.skinTone}
+      Facial Features: ${profile.facialFeatures}
+      
+      Setting: An appropriate background for the occasion (e.g., office for work, cafe for date).
+      The image should look like a professional fashion photography shot.
+      ${profile.avatarImage ? "Make the person in the generated image resemble the person in the provided reference image." : ""}
+    `;
+
+    if (profile.avatarImage) {
+      parts.push(fileToPart(profile.avatarImage, 'image/jpeg')); 
+    }
+
+  } else {
+    // 2D Sketch
+    prompt = `
+      Generate a high-fashion, realistic 2D full-body illustration/sketch of a person wearing this exact outfit:
+      
+      ${outfitDescription}
+      
+      Model details:
+      Gender: ${profile.gender}
+      Skin Tone: ${profile.skinTone}
+      Hairstyle: ${recommendation.hairstyle}
+      
+      Style: Professional fashion design sketch, clean background, artistic but clear details. Focus on the clothing fit and coordination.
+    `;
+  }
+
+  parts.push({ text: prompt });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: { parts: parts },
+      config: imageConfig ? { imageConfig } : undefined,
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Image Generation Error:", error);
+    return null; 
+  }
+};

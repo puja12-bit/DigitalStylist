@@ -19,10 +19,7 @@ export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-  
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const schema = {
     type: Type.OBJECT,
@@ -73,10 +70,7 @@ export const analyzeWardrobeFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const schema = {
     type: Type.ARRAY,
@@ -127,10 +121,7 @@ export const generateOutfit = async (
   occasion: string
 ): Promise<OutfitRecommendation> => {
   
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Define the schema for the output
   const itemSchema = {
@@ -217,10 +208,7 @@ export const generateOutfitImage = async (
   profile: UserProfile,
   style: '2D' | 'REAL' = '2D'
 ): Promise<string | null> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (!apiKey) throw new Error("API Key is missing");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   let prompt = "";
   const parts: any[] = [];

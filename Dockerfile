@@ -4,8 +4,16 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
 
-# COPY . . will now include the .env file created by Cloud Build
+# Copy all files (Now including .env since .dockerignore is gone)
 COPY . .
+
+# --- DEBUGGING STEP ---
+# This will print the first 4 characters of the key in the build logs.
+# If you see "Key Check: AIza...", it works.
+# If you see "Key Check: ...", it failed.
+RUN if [ -f .env ]; then echo "Key Check: Found .env file!"; else echo "Key Check: ERROR - .env file missing!"; fi
+RUN cat .env | head -c 19 && echo "..."
+# ----------------------
 
 # Build the app
 RUN npm run build || true

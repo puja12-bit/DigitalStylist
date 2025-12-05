@@ -1,16 +1,17 @@
 steps:
-  # STEP 0: Force-write the API Key into a .env file
-  # This happens in the build server, before Docker starts.
-  - name: 'ubuntu'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}" > .env
-        echo "Created .env file with API Key"
+  # 1. Install Dependencies (Directly on the builder machine)
+  - name: 'node:20'
+    entrypoint: 'npm'
+    args: ['install', '--legacy-peer-deps']
 
-  # STEP 1: Build Docker Image
-  # Since .env exists now, Docker will copy it in automatically.
+  # 2. Build the App (Inject the Key HERE - No Docker involvement yet)
+  - name: 'node:20'
+    entrypoint: 'npm'
+    args: ['run', 'build']
+    env:
+      - 'VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}'
+
+  # 3. Package the built app into Docker
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
@@ -19,11 +20,11 @@ steps:
       '.'
     ]
 
-  # STEP 2: Push Image
+  # 4. Push Image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA']
 
-  # STEP 3: Deploy to 'digitalstylist'
+  # 5. Deploy
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:

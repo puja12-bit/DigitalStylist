@@ -1,8 +1,4 @@
-/* 
-   FIX APPLIED: Switched to @google/generative-ai (Web SDK) 
-   This works reliably in Browser/React environments.
-*/
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import { UserProfile, WardrobeItem, OutfitRecommendation, SkinTone } from "../types";
 
 // Helper to sanitize JSON
@@ -10,9 +6,7 @@ const cleanJSON = (text: string): string => {
   return text.replace(/```json\s*|\s*```/g, "").trim();
 };
 
-// Helper to convert base64 to GenerativePart
 const fileToPart = (base64Data: string, mimeType: string) => {
-  // Remove the "data:image/jpeg;base64," prefix if present
   const base64Content = base64Data.split(',')[1] || base64Data;
   return {
     inlineData: {
@@ -27,14 +21,30 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 // Initialize Client
 const genAI = new GoogleGenerativeAI(API_KEY || "");
 
+// *** CRITICAL FIX: SAFETY SETTINGS ***
+// This allows the AI to analyze photos of people without blocking it as "Harmful"
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-  if (!API_KEY) throw new Error("API Key is missing in browser.");
+  
+  // Debugging: Check if Key exists in the browser
+  if (!API_KEY) {
+    alert("Critical Error: API Key is missing. The build did not pass the variable.");
+    throw new Error("API Key is missing.");
+  }
 
-  // Use the standard stable model
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    safetySettings: safetySettings // <--- Applied here
+  });
 
   const schema = {
     type: SchemaType.OBJECT,
@@ -52,15 +62,13 @@ export const analyzeUserProfileFromImage = async (
 
   try {
     const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            fileToPart(base64Image, mimeType),
-            { text: prompt }
-          ]
-        }
-      ],
+      contents: [{
+        role: "user",
+        parts: [
+          fileToPart(base64Image, mimeType),
+          { text: prompt }
+        ]
+      }],
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: schema,
@@ -68,6 +76,8 @@ export const analyzeUserProfileFromImage = async (
     });
 
     const text = result.response.text();
+    console.log("AI Response:", text); // Debugging: See what AI says in Console (F12)
+    
     const data = JSON.parse(cleanJSON(text));
     
     return {
@@ -79,8 +89,11 @@ export const analyzeUserProfileFromImage = async (
     };
 
   } catch (error: any) {
-    console.error("Profile Analysis Error:", error);
-    // Throw the ACTUAL error so you can see it in the console/UI
+    console.error("Profile Analysis Error Full Details:", error);
+    // If it's a safety block, tell the user
+    if (error.message?.includes("SAFETY")) {
+      throw new Error("AI blocked this image for safety reasons. Please try a different photo.");
+    }
     throw new Error(error.message || "Failed to analyze image");
   }
 };
@@ -90,7 +103,11 @@ export const analyzeWardrobeFromImage = async (
   mimeType: string
 ): Promise<WardrobeItem[]> => {
   if (!API_KEY) throw new Error("API Key is missing.");
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    safetySettings: safetySettings 
+  });
 
   const schema = {
     type: SchemaType.ARRAY,
@@ -142,7 +159,11 @@ export const generateOutfit = async (
   occasion: string
 ): Promise<OutfitRecommendation> => {
   if (!API_KEY) throw new Error("API Key is missing.");
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    safetySettings: safetySettings 
+  });
 
   const itemSchema = {
     type: SchemaType.OBJECT,

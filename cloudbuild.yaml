@@ -1,37 +1,45 @@
 steps:
-  # Build the container image and pass the API key as a build argument
+  # STEP 0: Force-write the API Key into a .env file
+  # This happens in the build server, before Docker starts.
+  - name: 'ubuntu'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}" > .env
+        echo "Created .env file with API Key"
+
+  # STEP 1: Build Docker Image
+  # Since .env exists now, Docker will copy it in automatically.
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
-      '--build-arg',
-      'VITE_GEMINI_API_KEY=${_VITE_GEMINI_API_KEY}',
       '-t',
       'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA',
       '.'
     ]
 
-  # Push the image to Container Registry
+  # STEP 2: Push Image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA']
 
-  # Deploy container to Cloud Run
+  # STEP 3: Deploy to 'digitalstylist'
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - 'run'
       - 'deploy'
-      - 'digitalstylist'   # <-- UPDATED: Matches your URL name
+      - 'digitalstylist'
       - '--image'
       - 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA'
       - '--region'
-      - 'europe-west1'     # <-- UPDATED: Matches your URL region
+      - 'europe-west1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
 
-# Define the substitution variable (so it can be set in the Trigger UI)
 substitutions:
-  _VITE_GEMINI_API_KEY: 'PLACEHOLDER_VALUE_WILL_BE_OVERRIDDEN'
+  _VITE_GEMINI_API_KEY: 'PLACEHOLDER'
 
 images:
   - 'gcr.io/$PROJECT_ID/style-confident-ai:$COMMIT_SHA'

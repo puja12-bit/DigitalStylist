@@ -1,67 +1,74 @@
-import { GoogleGenAI, Type, ImageGenerationConfig } from "@google/genai";
+/* 
+   FIX APPLIED: Switched to @google/generative-ai (Web SDK) 
+   This works reliably in Browser/React environments.
+*/
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { UserProfile, WardrobeItem, OutfitRecommendation, SkinTone } from "../types";
 
-// Helper to sanitize the response text into valid JSON
+// Helper to sanitize JSON
 const cleanJSON = (text: string): string => {
   return text.replace(/```json\s*|\s*```/g, "").trim();
 };
 
+// Helper to convert base64 to GenerativePart
 const fileToPart = (base64Data: string, mimeType: string) => {
+  // Remove the "data:image/jpeg;base64," prefix if present
+  const base64Content = base64Data.split(',')[1] || base64Data;
   return {
     inlineData: {
-      data: base64Data,
+      data: base64Content,
       mimeType
     }
   };
 };
 
-// *** DEPLOYMENT FIX: Use Vite-compatible Environment Variable ***
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// Helper to ensure client exists
-const getClient = () => {
-  if (!API_KEY) {
-    throw new Error("API Key is missing. Please check your Cloud Build configuration.");
-  }
-  return new GoogleGenAI({ apiKey: API_KEY });
-};
+// Initialize Client
+const genAI = new GoogleGenerativeAI(API_KEY || "");
 
 export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-  const ai = getClient();
+  if (!API_KEY) throw new Error("API Key is missing in browser.");
+
+  // Use the standard stable model
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
   const schema = {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
-      gender: { type: Type.STRING, enum: ["Male", "Female", "Non-Binary"] },
-      estimatedHeightCm: { type: Type.NUMBER },
-      estimatedWeightKg: { type: Type.NUMBER },
-      skinTone: { type: Type.STRING, enum: Object.values(SkinTone) },
-      facialFeatures: { type: Type.STRING, description: "Detailed description of face shape, hair, facial hair, etc." },
+      gender: { type: SchemaType.STRING },
+      estimatedHeightCm: { type: SchemaType.NUMBER },
+      estimatedWeightKg: { type: SchemaType.NUMBER },
+      skinTone: { type: SchemaType.STRING },
+      facialFeatures: { type: SchemaType.STRING },
     },
     required: ["gender", "estimatedHeightCm", "estimatedWeightKg", "skinTone", "facialFeatures"]
   };
 
-  const prompt = "Analyze this person's physical attributes for a fashion styling app. Estimate gender, height (in cm), weight (in kg), skin tone (strictly pick the closest match), and describe facial features. Be respectful and objective.";
+  const prompt = "Analyze this person's physical attributes for a fashion styling app. Estimate gender, height (in cm), weight (in kg), skin tone (strictly pick the closest match), and describe facial features. Return JSON.";
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", // *** FIX: Use Stable Model ***
-      contents: {
-        parts: [
-          fileToPart(base64Image, mimeType),
-          { text: prompt }
-        ]
-      },
-      config: {
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            fileToPart(base64Image, mimeType),
+            { text: prompt }
+          ]
+        }
+      ],
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: schema,
-      },
+      }
     });
 
-    const data = JSON.parse(cleanJSON(response.text || "{}"));
+    const text = result.response.text();
+    const data = JSON.parse(cleanJSON(text));
     
     return {
       gender: data.gender,
@@ -71,9 +78,10 @@ export const analyzeUserProfileFromImage = async (
       facialFeatures: data.facialFeatures
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Profile Analysis Error:", error);
-    throw new Error("Could not analyze image. Please try manually entering data.");
+    // Throw the ACTUAL error so you can see it in the console/UI
+    throw new Error(error.message || "Failed to analyze image");
   }
 };
 
@@ -81,39 +89,41 @@ export const analyzeWardrobeFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
-  const ai = getClient();
+  if (!API_KEY) throw new Error("API Key is missing.");
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
   const schema = {
-    type: Type.ARRAY,
+    type: SchemaType.ARRAY,
     items: {
-      type: Type.OBJECT,
+      type: SchemaType.OBJECT,
       properties: {
-        name: { type: Type.STRING, description: "Specific name of item e.g. 'Distressed Denim Jacket'" },
-        category: { type: Type.STRING, enum: ["Top", "Bottom", "Shoes", "Accessory", "Outerwear"] },
-        color: { type: Type.STRING, description: "Precise color name e.g. 'Navy Blue', 'Charcoal'" }
+        name: { type: SchemaType.STRING },
+        category: { type: SchemaType.STRING },
+        color: { type: SchemaType.STRING }
       },
       required: ["name", "category", "color"]
     }
   };
 
-  const prompt = "Identify all clothing items, shoes, or accessories in this image. For each item, provide a category, a specific color name, and a descriptive name.";
+  const prompt = "Identify all clothing items. Provide name, category, and color. Return JSON array.";
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", // *** FIX: Use Stable Model ***
-      contents: {
+    const result = await model.generateContent({
+      contents: [{
+        role: "user",
         parts: [
           fileToPart(base64Image, mimeType),
           { text: prompt }
         ]
-      },
-      config: {
+      }],
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: schema,
-      },
+      }
     });
 
-    const items = JSON.parse(cleanJSON(response.text || "[]"));
+    const text = result.response.text();
+    const items = JSON.parse(cleanJSON(text));
     
     return items.map((item: any) => ({
       id: Math.random().toString(36).substr(2, 9),
@@ -122,7 +132,7 @@ export const analyzeWardrobeFromImage = async (
 
   } catch (error) {
     console.error("Wardrobe Analysis Error:", error);
-    throw new Error("Could not identify items in image.");
+    throw new Error("Could not identify items.");
   }
 };
 
@@ -131,93 +141,65 @@ export const generateOutfit = async (
   wardrobe: WardrobeItem[],
   occasion: string
 ): Promise<OutfitRecommendation> => {
-  const ai = getClient();
+  if (!API_KEY) throw new Error("API Key is missing.");
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
   const itemSchema = {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
-      name: { type: Type.STRING, description: "Name of the item (e.g., White Linen Shirt)" },
-      description: { type: Type.STRING, description: "Brief description of style/fit" },
-      color: { type: Type.STRING, description: "Color of the item" },
-      source: { type: Type.STRING, enum: ["Wardrobe", "Shopping"], description: "Whether this comes from user's wardrobe or needs to be bought" },
-      reasoning: { type: Type.STRING, description: "Why this specific item fits the user and occasion" },
+      name: { type: SchemaType.STRING },
+      description: { type: SchemaType.STRING },
+      color: { type: SchemaType.STRING },
+      source: { type: SchemaType.STRING, enum: ["Wardrobe", "Shopping"] },
+      reasoning: { type: SchemaType.STRING },
     },
     required: ["name", "description", "color", "source", "reasoning"]
   };
 
   const responseSchema = {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
       top: itemSchema,
       bottom: itemSchema,
       shoes: itemSchema,
       accessory: itemSchema,
-      hairstyle: { type: Type.STRING, description: "Recommended hairstyle name" },
-      hairstyleReasoning: { type: Type.STRING, description: "Why this hairstyle suits user's face shape" },
-      confidenceTip: { type: Type.STRING, description: "A tip to boost confidence for this specific occasion" },
-      overallVibe: { type: Type.STRING, description: "Description of the overall look" },
+      hairstyle: { type: SchemaType.STRING },
+      hairstyleReasoning: { type: SchemaType.STRING },
+      confidenceTip: { type: SchemaType.STRING },
+      overallVibe: { type: SchemaType.STRING },
     },
     required: ["top", "bottom", "shoes", "accessory", "hairstyle", "hairstyleReasoning", "confidenceTip", "overallVibe"]
   };
 
   const wardrobeList = wardrobe.map(w => `- ${w.color} ${w.name} (${w.category})`).join("\n");
 
-  const systemInstruction = "You are a world-class fashion stylist specializing in color theory, body types, and confidence coaching.";
-
   const prompt = `
-    User Profile:
-    - Gender: ${profile.gender}
-    - Height: ${profile.heightCm}cm
-    - Weight: ${profile.weightKg}kg
-    - Skin Tone: ${profile.skinTone}
-    - Facial Features: ${profile.facialFeatures}
-
+    User Profile: ${profile.gender}, ${profile.heightCm}cm, ${profile.weightKg}kg, ${profile.skinTone}, ${profile.facialFeatures}
     Occasion: "${occasion}"
-
-    User's Existing Wardrobe:
-    ${wardrobeList.length > 0 ? wardrobeList : "The user has no items recorded. You MUST recommend shopping items."}
-
-    Goal: Create the perfect outfit for this specific occasion that maximizes the user's confidence.
+    Wardrobe: ${wardrobeList}
     
-    Guidelines:
-    1. PRIORITIZE items from the "User's Existing Wardrobe". Only suggest "Shopping" items if the wardrobe is completely unsuitable or missing a critical piece.
-    2. Consider the user's skin tone for color selection.
-    3. Consider the user's height/weight for fit recommendations.
-    4. Consider facial features for hairstyle and accessory choice.
-    5. The "source" field in the JSON MUST be strictly "Wardrobe" if the item exists in the provided list, otherwise "Shopping".
-    
-    Return the response strictly in JSON format matching the schema.
+    Goal: Create an outfit. Prioritize wardrobe. If missing items, suggest Shopping.
+    Return JSON.
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash", // *** FIX: Use Stable Model ***
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
-        temperature: 0.4, 
-      },
+      }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("No response from AI");
-
+    const text = result.response.text();
     return JSON.parse(cleanJSON(text)) as OutfitRecommendation;
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    throw new Error("Failed to generate outfit. Please check your API key and try again.");
+    console.error("Outfit Gen Error:", error);
+    throw new Error("Failed to generate outfit.");
   }
 };
 
-export const generateOutfitImage = async (
-  recommendation: OutfitRecommendation,
-  profile: UserProfile,
-  style: '2D' | 'REAL' = '2D'
-): Promise<string | null> => {
-    // Image generation is temporarily disabled to prevent crashes, 
-    // as it requires specific model access not always available.
-    return null; 
+export const generateOutfitImage = async (): Promise<string | null> => {
+  return null;
 };

@@ -4,7 +4,6 @@ import {
   HarmCategory, 
   HarmBlockThreshold 
 } from "@google/generative-ai";
-
 import { 
   UserProfile, 
   WardrobeItem, 
@@ -12,16 +11,18 @@ import {
   SkinTone 
 } from "../types";
 
-// ------------------------------------------------------------
-// HARD-CODED KEY FIX
-// Cloud Run will NOT pass Vite variables at build time.
-// import.meta.env.VITE_GEMINI_API_KEY will ALWAYS be "" there.
-// So we hardcode to guarantee functionality.
-// ------------------------------------------------------------
+// Get API key from runtime-injected env (env.js)
+declare global {
+  interface Window {
+    __ENV?: {
+      GEMINI_API_KEY?: string;
+    };
+  }
+}
 
-const API_KEY = "AIzaSyAoUR5Hom7FrLBZTfHb4tla8XcljuTW8uE";   // <--- REPLACE THIS
+const API_KEY = window.__ENV?.GEMINI_API_KEY || "";
 
-// Initialize Gemini client
+// Init client
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 // JSON sanitizer

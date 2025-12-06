@@ -1,17 +1,22 @@
-import { 
-  GoogleGenerativeAI, 
-  SchemaType, 
-  HarmCategory, 
-  HarmBlockThreshold 
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  HarmCategory,
+  HarmBlockThreshold,
 } from "@google/generative-ai";
-import { 
-  UserProfile, 
-  WardrobeItem, 
-  OutfitRecommendation, 
-  SkinTone 
+
+import {
+  UserProfile,
+  WardrobeItem,
+  OutfitRecommendation,
+  SkinTone,
 } from "../types";
 
-// Get API key from runtime-injected env (env.js)
+// -------------------------------------------------------------------
+// API KEY SOURCE: runtime env.js injected by Cloud Run
+// window.__ENV is defined in public/env.js and overwritten at container start.
+// -------------------------------------------------------------------
+
 declare global {
   interface Window {
     __ENV?: {
@@ -20,50 +25,66 @@ declare global {
   }
 }
 
+// Read key from runtime env
 const API_KEY = window.__ENV?.GEMINI_API_KEY || "";
 
-// Init client
-const genAI = new GoogleGenerativeAI(API_KEY);
-
-// JSON sanitizer
-const cleanJSON = (text: string): string => {
-  return text.replace(/```json\s*|\s*```/g, "").trim();
+// Client initializer
+const getClient = () => {
+  if (!API_KEY) {
+    throw new Error(
+      "API Key missing. Set GEMINI_API_KEY env var in Cloud Run and make sure env.js is loaded."
+    );
+  }
+  return new GoogleGenerativeAI(API_KEY);
 };
 
-// Convert base64 → Gemini inlineData
+// Clean ```json ... ``` wrappers
+const cleanJSON = (text: string): string =>
+  text.replace(/```json\s*|\s*```/g, "").trim();
+
+// Base64 → Gemini inlineData
 const fileToPart = (base64Data: string, mimeType: string) => {
-  const base64Content = base64Data.split(',')[1] || base64Data;
+  const base64Content = base64Data.split(",")[1] || base64Data;
   return {
     inlineData: {
       data: base64Content,
-      mimeType
-    }
+      mimeType,
+    },
   };
 };
 
-// Required to allow images of people
+// Safety settings
 const safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
 ];
 
-/* ------------------------------------------------------------------
-   Analyze User Profile From Image
--------------------------------------------------------------------*/
+// -------------------------------------------------------------------
+// 1) Analyze User Profile from Image
+// -------------------------------------------------------------------
 export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-
-  if (!API_KEY) {
-    throw new Error("API Key missing. Insert key in geminiService.ts.");
-  }
+  const genAI = getClient();
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash-lite",
-    safetySettings
+    safetySettings,
   });
 
   const schema = {
@@ -75,26 +96,31 @@ export const analyzeUserProfileFromImage = async (
       skinTone: { type: SchemaType.STRING },
       facialFeatures: { type: SchemaType.STRING },
     },
-    required: ["gender", "estimatedHeightCm", "estimatedWeightKg", "skinTone", "facialFeatures"]
+    required: [
+      "gender",
+      "estimatedHeightCm",
+      "estimatedWeightKg",
+      "skinTone",
+      "facialFeatures",
+    ],
   };
 
-  const prompt = 
+  const prompt =
     "Analyze this person's physical attributes for a fashion styling app. " +
     "Estimate gender, height (cm), weight (kg), skin tone, and describe facial features. Return JSON.";
 
   try {
     const result = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [
-          fileToPart(base64Image, mimeType),
-          { text: prompt }
-        ]
-      }],
+      contents: [
+        {
+          role: "user",
+          parts: [fileToPart(base64Image, mimeType), { text: prompt }],
+        },
+      ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema
-      }
+        responseSchema: schema,
+      },
     });
 
     const text = result.response.text();
@@ -105,28 +131,26 @@ export const analyzeUserProfileFromImage = async (
       heightCm: data.estimatedHeightCm,
       weightKg: data.estimatedWeightKg,
       skinTone: data.skinTone as SkinTone,
-      facialFeatures: data.facialFeatures
+      facialFeatures: data.facialFeatures,
     };
-
   } catch (error: any) {
     console.error("Profile Analysis Error:", error);
     throw new Error(error.message || "Failed to analyze profile image.");
   }
 };
 
-/* ------------------------------------------------------------------
-   Analyze Wardrobe Items
--------------------------------------------------------------------*/
+// -------------------------------------------------------------------
+// 2) Analyze Wardrobe from Image
+// -------------------------------------------------------------------
 export const analyzeWardrobeFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
-
-  if (!API_KEY) throw new Error("API Key missing.");
+  const genAI = getClient();
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash-lite",
-    safetySettings
+    safetySettings,
   });
 
   const schema = {
@@ -136,27 +160,27 @@ export const analyzeWardrobeFromImage = async (
       properties: {
         name: { type: SchemaType.STRING },
         category: { type: SchemaType.STRING },
-        color: { type: SchemaType.STRING }
+        color: { type: SchemaType.STRING },
       },
-      required: ["name", "category", "color"]
-    }
+      required: ["name", "category", "color"],
+    },
   };
 
-  const prompt = "Identify all clothing items. Return name, category, color as JSON array.";
+  const prompt =
+    "Identify all clothing items in this image. Return name, category, and color as a JSON array.";
 
   try {
     const result = await model.generateContent({
-      contents: [{
-        role: "user",
-        parts: [
-          fileToPart(base64Image, mimeType),
-          { text: prompt }
-        ]
-      }],
+      contents: [
+        {
+          role: "user",
+          parts: [fileToPart(base64Image, mimeType), { text: prompt }],
+        },
+      ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema
-      }
+        responseSchema: schema,
+      },
     });
 
     const text = result.response.text();
@@ -164,29 +188,27 @@ export const analyzeWardrobeFromImage = async (
 
     return items.map((item: any) => ({
       id: Math.random().toString(36).substring(2, 9),
-      ...item
+      ...item,
     }));
-
-  } catch (error) {
+  } catch (error: any) {
     console.error("Wardrobe Analysis Error:", error);
-    throw new Error("Wardrobe analysis failed.");
+    throw new Error(error.message || "Wardrobe analysis failed.");
   }
 };
 
-/* ------------------------------------------------------------------
-   Generate Outfit
--------------------------------------------------------------------*/
+// -------------------------------------------------------------------
+// 3) Generate Outfit
+// -------------------------------------------------------------------
 export const generateOutfit = async (
   profile: UserProfile,
   wardrobe: WardrobeItem[],
   occasion: string
 ): Promise<OutfitRecommendation> => {
-
-  if (!API_KEY) throw new Error("API Key missing.");
+  const genAI = getClient();
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-lite",
-    safetySettings
+    model: "gemini-2.5-flash-lite",
+    safetySettings,
   });
 
   const itemSchema = {
@@ -198,7 +220,7 @@ export const generateOutfit = async (
       source: { type: SchemaType.STRING, enum: ["Wardrobe", "Shopping"] },
       reasoning: { type: SchemaType.STRING },
     },
-    required: ["name", "description", "color", "source", "reasoning"]
+    required: ["name", "description", "color", "source", "reasoning"],
   };
 
   const responseSchema = {
@@ -211,16 +233,22 @@ export const generateOutfit = async (
       hairstyle: { type: SchemaType.STRING },
       hairstyleReasoning: { type: SchemaType.STRING },
       confidenceTip: { type: SchemaType.STRING },
-      overallVibe: { type: SchemaType.STRING }
+      overallVibe: { type: SchemaType.STRING },
     },
     required: [
-      "top", "bottom", "shoes", "accessory", "hairstyle",
-      "hairstyleReasoning", "confidenceTip", "overallVibe"
-    ]
+      "top",
+      "bottom",
+      "shoes",
+      "accessory",
+      "hairstyle",
+      "hairstyleReasoning",
+      "confidenceTip",
+      "overallVibe",
+    ],
   };
 
   const wardrobeList = wardrobe
-    .map(w => `- ${w.color} ${w.name} (${w.category})`)
+    .map((w) => `- ${w.color} ${w.name} (${w.category})`)
     .join("\n");
 
   const prompt = `
@@ -229,7 +257,8 @@ export const generateOutfit = async (
     Wardrobe:
     ${wardrobeList}
 
-    Create a complete outfit. Prioritize existing wardrobe. Return JSON.
+    Create a complete outfit. Prioritize existing wardrobe. Use "Wardrobe" vs "Shopping" correctly.
+    Return JSON.
   `;
 
   try {
@@ -237,16 +266,15 @@ export const generateOutfit = async (
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema
-      }
+        responseSchema,
+      },
     });
 
     const text = result.response.text();
     return JSON.parse(cleanJSON(text));
-
-  } catch (error) {
+  } catch (error: any) {
     console.error("Outfit Generation Error:", error);
-    throw new Error("Failed to generate outfit.");
+    throw new Error(error.message || "Failed to generate outfit.");
   }
 };
 

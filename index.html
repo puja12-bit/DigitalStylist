@@ -2,77 +2,100 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
     <title>StyleConfident AI</title>
-    
+
     <!-- Mobile Web App Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0a0a0a"
+      media="(prefers-color-scheme: dark)"
+    />
 
     <!-- Favicon -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%232563eb%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M12 8.35L3.6 14.5a1 1 0 0 0 .6 1.8h15.6a1 1 0 0 0 .6-1.8L12 8.35z%22/><path d=%22M12 8.35V5a3 3 0 0 0-3-3%22/></svg>">
+    <link
+      rel="icon"
+      href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%232563eb%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M12 8.35L3.6 14.5a1 1 0 0 0 .6 1.8h15.6a1 1 0 0 0 .6-1.8L12 8.35z%22/><path d=%22M12 8.35V5a3 3 0 0 0-3-3%22/></svg>'
+    />
 
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- 🔹 Runtime env (GEMINI_API_KEY) injected by Cloud Run via env.js -->
+    <script src="/env.js"></script>
+
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
-        darkMode: 'class',
+        darkMode: "class",
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              serif: ['Playfair Display', 'serif'],
+              sans: ["Inter", "sans-serif"],
+              serif: ["Playfair Display", "serif"],
             },
             colors: {
               primary: {
-                50: '#eff6ff',
-                100: '#dbeafe',
-                200: '#bfdbfe',
-                300: '#93c5fd',
-                400: '#60a5fa',
-                500: '#3b82f6',
-                600: '#2563eb',
-                700: '#1d4ed8',
-                800: '#1e40af',
-                900: '#1e3a8a',
-                950: '#172554',
+                50: "#eff6ff",
+                100: "#dbeafe",
+                200: "#bfdbfe",
+                300: "#93c5fd",
+                400: "#60a5fa",
+                500: "#3b82f6",
+                600: "#2563eb",
+                700: "#1d4ed8",
+                800: "#1e40af",
+                900: "#1e3a8a",
+                950: "#172554",
               },
               neutral: {
-                50: '#f8fafc',
-                100: '#f1f5f9',
-                200: '#e2e8f0',
-                300: '#cbd5e1',
-                400: '#94a3b8',
-                500: '#64748b',
-                600: '#475569',
-                700: '#334155',
-                800: '#1e293b',
-                900: '#0f172a',
-                950: '#020617',
-              }
-            }
-          }
+                50: "#f8fafc",
+                100: "#f1f5f9",
+                200: "#e2e8f0",
+                300: "#cbd5e1",
+                400: "#94a3b8",
+                500: "#64748b",
+                600: "#475569",
+                700: "#334155",
+                800: "#1e293b",
+                900: "#0f172a",
+                950: "#020617",
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://aistudiocdn.com/react@^19.2.0",
+          "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+          "react/": "https://aistudiocdn.com/react@^19.2.0/",
+          "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+          "vite": "https://aistudiocdn.com/vite@^7.2.4",
+          "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
         }
       }
     </script>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "vite": "https://aistudiocdn.com/vite@^7.2.4",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
-  }
-}
-</script>
-</head>
-  <body class="bg-neutral-50 text-neutral-800 antialiased selection:bg-primary-200 selection:text-primary-900 dark:bg-neutral-950 dark:text-neutral-100 transition-colors duration-300">
+  </head>
+  <body
+    class="bg-neutral-50 text-neutral-800 antialiased selection:bg-primary-200 selection:text-primary-900 dark:bg-neutral-950 dark:text-neutral-100 transition-colors duration-300"
+  >
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
   </body>

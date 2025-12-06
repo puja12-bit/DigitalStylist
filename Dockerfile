@@ -27,10 +27,12 @@ RUN npm run build || true
 # Now we switch to Nginx
 FROM nginx:alpine
 
-# We copy the 'dist' folder FROM Stage 1 (build) TO Stage 2
-# This guarantees 'dist' exists.
-COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
+
+# Inject GEMINI_API_KEY into env.js at container start
+CMD ["/bin/sh", "-c", "echo \"window.__ENV = { GEMINI_API_KEY: '\\\"$GEMINI_API_KEY\\\"' };\" > /usr/share/nginx/html/env.js && nginx -g 'daemon off;'"]
+
+

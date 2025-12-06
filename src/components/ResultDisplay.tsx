@@ -12,12 +12,18 @@ interface Props {
 
 const ItemCard: React.FC<{ item: RecommendedItem; type: string; isShopping?: boolean }> = ({ item, type, isShopping }) => {
   const searchUrl = (site: string) => {
-    const query = encodeURIComponent(`${item.name} ${type}`);
+    const query = encodeURIComponent(`${item.color} ${item.name} ${type}`);
     if (site === 'amazon') return `https://www.amazon.com/s?k=${query}`;
     if (site === 'myntra') return `https://www.myntra.com/${query.replace(/%20/g, '-')}`;
     if (site === 'ajio') return `https://www.ajio.com/search/?text=${query}`;
     return '#';
   };
+
+  // 🔹 Avoid “Mauve Mauve …” when the name already starts with the color
+  const displayName =
+    item.name.toLowerCase().startsWith(item.color.toLowerCase())
+      ? item.name
+      : `${item.color} ${item.name}`;
 
   return (
     <div className={`relative p-5 rounded-2xl border ${isShopping ? 'bg-white dark:bg-neutral-900 border-primary-200 dark:border-primary-800' : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'} shadow-sm flex flex-col h-full`}>

@@ -10,12 +10,19 @@ COPY . .
 RUN npm run build
 
 # ---- Runtime stage ----
-FROM nginx:alpine
+FROM node:20-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --only=production
+
+COPY --from=build /app/dist ./dist
+COPY server.js ./
+
+ENV NODE_ENV=production
+ENV PORT=8080
 
 EXPOSE 8080
 
-# On container start, generate env.js from GEMINI_API_KEY env var, then start nginx
-CMD ["/bin/sh", "-c", "printf 'window.__ENV = { GEMINI_API_KEY: \"%s\" };\n' \"$GEMINI_API_KEY\" > /usr/share/nginx/html/env.js && nginx -g 'daemon off;'"]
+CMD ["node", "server.js"]

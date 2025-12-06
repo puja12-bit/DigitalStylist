@@ -61,7 +61,7 @@ export const analyzeUserProfileFromImage = async (
   }
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash-lite",
     safetySettings
   });
 
@@ -124,7 +124,7 @@ export const analyzeWardrobeFromImage = async (
   if (!API_KEY) throw new Error("API Key missing.");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash-lite",
     safetySettings
   });
 

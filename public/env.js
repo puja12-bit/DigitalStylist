@@ -1,5 +1,5 @@
-// This gets overwritten in Cloud Run at container start.
-// Default empty value for local/dev.
+// Default dev-time env (empty). In Cloud Run this file is overwritten
+// at container start with the real GEMINI_API_KEY.
 window.__ENV = {
   GEMINI_API_KEY: "",
 };

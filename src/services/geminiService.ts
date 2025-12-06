@@ -184,7 +184,7 @@ export const generateOutfit = async (
   if (!API_KEY) throw new Error("API Key missing.");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash-lite",
     safetySettings
   });
 

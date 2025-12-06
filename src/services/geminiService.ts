@@ -198,29 +198,48 @@ export const analyzeWardrobeFromImage = async (
 // -------------------------------------------------------------------
 // 3) Generate Outfit
 // -------------------------------------------------------------------
-export const generateOutfit = async (
+export const generateOutfitImage = async (
+  recommendation: OutfitRecommendation,
   profile: UserProfile,
-  wardrobe: WardrobeItem[],
-  occasion: string
-): Promise<OutfitRecommendation> => {
-  const genAI = getClient();
+  mode: "FASHION_SKETCH" | "REAL_LOOK"
+): Promise<string | null> => {
+  try {
+    // avatarImage must be base64 from profile analysis step
+    if (!profile.avatarImage) {
+      throw new Error("No profile image available for visualization.");
+    }
 
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-lite",
-    safetySettings,
-  });
+    const res = await fetch("/api/outfit-image", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        profile,
+        recommendation,
+        mode,
+      }),
+    });
 
-  const itemSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-      name: { type: SchemaType.STRING },
-      description: { type: SchemaType.STRING },
-      color: { type: SchemaType.STRING },
-      source: { type: SchemaType.STRING, enum: ["Wardrobe", "Shopping"] },
-      reasoning: { type: SchemaType.STRING },
-    },
-    required: ["name", "description", "color", "source", "reasoning"],
-  };
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(
+        `Image generation failed (${res.status}): ${text || "Unknown error"}`
+      );
+    }
+
+    const data = await res.json();
+    // backend will return { imageDataUrl: "data:image/png;base64,..." }
+    if (!data.imageDataUrl) {
+      throw new Error("Backend did not return an image.");
+    }
+
+    return data.imageDataUrl as string;
+  } catch (err) {
+    console.error("generateOutfitImage frontend error:", err);
+    throw err;
+  }
+};
 
   const responseSchema = {
     type: SchemaType.OBJECT,

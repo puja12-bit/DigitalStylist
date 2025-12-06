@@ -12,7 +12,7 @@ interface Props {
 
 const ItemCard: React.FC<{ item: RecommendedItem; type: string; isShopping?: boolean }> = ({ item, type, isShopping }) => {
   const searchUrl = (site: string) => {
-    const query = encodeURIComponent(`${item.color} ${item.name} ${type}`);
+    const query = encodeURIComponent(`${item.name} ${type}`);
     if (site === 'amazon') return `https://www.amazon.com/s?k=${query}`;
     if (site === 'myntra') return `https://www.myntra.com/${query.replace(/%20/g, '-')}`;
     if (site === 'ajio') return `https://www.ajio.com/search/?text=${query}`;

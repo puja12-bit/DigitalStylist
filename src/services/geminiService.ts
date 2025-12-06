@@ -1,301 +1,117 @@
 import {
-  GoogleGenerativeAI,
-  SchemaType,
-  HarmCategory,
-  HarmBlockThreshold,
-} from "@google/generative-ai";
-
-import {
   UserProfile,
   WardrobeItem,
-  OutfitRecommendation,
-  SkinTone,
+  OutfitRecommendation
 } from "../types";
 
-// -------------------------------------------------------------------
-// API KEY SOURCE: runtime env.js injected by Cloud Run
-// window.__ENV is defined in env.js and overwritten at container start.
-// -------------------------------------------------------------------
+const postJson = async <T>(url: string, body: any): Promise<T> => {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
 
-declare global {
-  interface Window {
-    __ENV?: {
-      GEMINI_API_KEY?: string;
-    };
-  }
-}
-
-const API_KEY = window.__ENV?.GEMINI_API_KEY || "";
-
-// Create client, throw clear error if key missing
-const getClient = () => {
-  if (!API_KEY) {
+  if (!res.ok) {
+    const text = await res.text();
     throw new Error(
-      "API Key missing. Set GEMINI_API_KEY env var in Cloud Run and make sure env.js is loaded."
+      `Request to ${url} failed (${res.status}): ${text || "Unknown error"}`
     );
   }
-  return new GoogleGenerativeAI(API_KEY);
+
+  return res.json() as Promise<T>;
 };
 
-// Clean ```json ... ``` wrappers from model responses
-const cleanJSON = (text: string): string =>
-  text.replace(/```json\s*|\s*```/g, "").trim();
-
-// Base64 → Gemini inlineData
-const fileToPart = (base64Data: string, mimeType: string) => {
-  const base64Content = base64Data.split(",")[1] || base64Data;
-  return {
-    inlineData: {
-      data: base64Content,
-      mimeType,
-    },
-  };
-};
-
-// Safety settings
-const safetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-];
-
-// -------------------------------------------------------------------
-// 1) Analyze User Profile from Image
-// -------------------------------------------------------------------
+// -------------------------------------------------------
+// 1) Analyze user profile from image
+// -------------------------------------------------------
 export const analyzeUserProfileFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<Partial<UserProfile>> => {
-  const genAI = getClient();
-
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-lite",
-    safetySettings,
-  });
-
-  const schema = {
-    type: SchemaType.OBJECT,
-    properties: {
-      gender: { type: SchemaType.STRING },
-      estimatedHeightCm: { type: SchemaType.NUMBER },
-      estimatedWeightKg: { type: SchemaType.NUMBER },
-      skinTone: { type: SchemaType.STRING },
-      facialFeatures: { type: SchemaType.STRING },
-    },
-    required: [
-      "gender",
-      "estimatedHeightCm",
-      "estimatedWeightKg",
-      "skinTone",
-      "facialFeatures",
-    ],
-  };
-
-  const prompt =
-    "Analyze this person's physical attributes for a fashion styling app. " +
-    "Estimate gender, height (cm), weight (kg), skin tone, and describe facial features. Return JSON.";
-
   try {
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [fileToPart(base64Image, mimeType), { text: prompt }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      },
-    });
-
-    const text = result.response.text();
-    const data = JSON.parse(cleanJSON(text));
-
-    return {
-      gender: data.gender,
-      heightCm: data.estimatedHeightCm,
-      weightKg: data.estimatedWeightKg,
-      skinTone: data.skinTone as SkinTone,
-      facialFeatures: data.facialFeatures,
-    };
-  } catch (error: any) {
-    console.error("Profile Analysis Error:", error);
-    throw new Error(error.message || "Failed to analyze profile image.");
+    return await postJson<Partial<UserProfile>>(
+      "/api/analyze-profile-image",
+      { base64Image, mimeType }
+    );
+  } catch (err: any) {
+    console.error("analyzeUserProfileFromImage error:", err);
+    throw new Error(
+      err?.message || "Failed to analyze profile image on server."
+    );
   }
 };
 
-// -------------------------------------------------------------------
-// 2) Analyze Wardrobe from Image
-// -------------------------------------------------------------------
+// -------------------------------------------------------
+// 2) Analyze wardrobe from image
+// -------------------------------------------------------
 export const analyzeWardrobeFromImage = async (
   base64Image: string,
   mimeType: string
 ): Promise<WardrobeItem[]> => {
-  const genAI = getClient();
-
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-lite",
-    safetySettings,
-  });
-
-  const schema = {
-    type: SchemaType.ARRAY,
-    items: {
-      type: SchemaType.OBJECT,
-      properties: {
-        name: { type: SchemaType.STRING },
-        category: { type: SchemaType.STRING },
-        color: { type: SchemaType.STRING },
-      },
-      required: ["name", "category", "color"],
-    },
-  };
-
-  const prompt =
-    "Identify all clothing items in this image. Return name, category, and color as a JSON array.";
-
   try {
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [fileToPart(base64Image, mimeType), { text: prompt }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      },
-    });
-
-    const text = result.response.text();
-    const items = JSON.parse(cleanJSON(text));
-
-    return items.map((item: any) => ({
-      id: Math.random().toString(36).substring(2, 9),
-      ...item,
-    }));
-  } catch (error: any) {
-    console.error("Wardrobe Analysis Error:", error);
-    throw new Error(error.message || "Wardrobe analysis failed.");
+    return await postJson<WardrobeItem[]>(
+      "/api/analyze-wardrobe-image",
+      { base64Image, mimeType }
+    );
+  } catch (err: any) {
+    console.error("analyzeWardrobeFromImage error:", err);
+    throw new Error(
+      err?.message || "Failed to analyze wardrobe image on server."
+    );
   }
 };
 
-// -------------------------------------------------------------------
-// 3) Generate Outfit
-// -------------------------------------------------------------------
+// -------------------------------------------------------
+// 3) Generate outfit (text)
+// -------------------------------------------------------
+export const generateOutfit = async (
+  profile: UserProfile,
+  wardrobe: WardrobeItem[],
+  occasion: string
+): Promise<OutfitRecommendation> => {
+  try {
+    return await postJson<OutfitRecommendation>("/api/generate-outfit", {
+      profile,
+      wardrobe,
+      occasion
+    });
+  } catch (err: any) {
+    console.error("generateOutfit error:", err);
+    throw new Error(
+      err?.message || "Failed to generate outfit on server."
+    );
+  }
+};
+
+// -------------------------------------------------------
+// 4) Generate outfit image (fashion sketch / real look)
+// -------------------------------------------------------
 export const generateOutfitImage = async (
   recommendation: OutfitRecommendation,
   profile: UserProfile,
   mode: "FASHION_SKETCH" | "REAL_LOOK"
 ): Promise<string | null> => {
   try {
-    // avatarImage must be base64 from profile analysis step
     if (!profile.avatarImage) {
       throw new Error("No profile image available for visualization.");
     }
 
-    const res = await fetch("/api/outfit-image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        profile,
+    const data = await postJson<{ imageDataUrl: string }>(
+      "/api/outfit-image",
+      {
         recommendation,
-        mode,
-      }),
-    });
+        profile,
+        mode
+      }
+    );
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(
-        `Image generation failed (${res.status}): ${text || "Unknown error"}`
-      );
-    }
-
-    const data = await res.json();
-    // backend will return { imageDataUrl: "data:image/png;base64,..." }
-    if (!data.imageDataUrl) {
-      throw new Error("Backend did not return an image.");
-    }
-
-    return data.imageDataUrl as string;
-  } catch (err) {
-    console.error("generateOutfitImage frontend error:", err);
-    throw err;
+    return data.imageDataUrl || null;
+  } catch (err: any) {
+    console.error("generateOutfitImage error:", err);
+    throw new Error(
+      err?.message || "Failed to generate outfit image on server."
+    );
   }
-};
-
-  const responseSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-      top: itemSchema,
-      bottom: itemSchema,
-      shoes: itemSchema,
-      accessory: itemSchema,
-      hairstyle: { type: SchemaType.STRING },
-      hairstyleReasoning: { type: SchemaType.STRING },
-      confidenceTip: { type: SchemaType.STRING },
-      overallVibe: { type: SchemaType.STRING },
-    },
-    required: [
-      "top",
-      "bottom",
-      "shoes",
-      "accessory",
-      "hairstyle",
-      "hairstyleReasoning",
-      "confidenceTip",
-      "overallVibe",
-    ],
-  };
-
-  const wardrobeList = wardrobe
-    .map((w) => `- ${w.color} ${w.name} (${w.category})`)
-    .join("\n");
-
-  const prompt = `
-    User Profile: ${profile.gender}, ${profile.heightCm}cm, ${profile.weightKg}kg, ${profile.skinTone}, ${profile.facialFeatures}
-    Occasion: "${occasion}"
-    Wardrobe:
-    ${wardrobeList}
-
-    Create a complete outfit. Prioritize existing wardrobe. Use "Wardrobe" vs "Shopping" correctly.
-    Return JSON.
-  `;
-
-  try {
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema,
-      },
-    });
-
-    const text = result.response.text();
-    return JSON.parse(cleanJSON(text));
-  } catch (error: any) {
-    console.error("Outfit Generation Error:", error);
-    throw new Error(error.message || "Failed to generate outfit.");
-  }
-};
-
-export const generateOutfitImage = async (): Promise<string | null> => {
-  return null;
 };

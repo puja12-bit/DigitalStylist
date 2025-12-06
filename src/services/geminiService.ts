@@ -14,7 +14,7 @@ import {
 
 // -------------------------------------------------------------------
 // API KEY SOURCE: runtime env.js injected by Cloud Run
-// window.__ENV is defined in public/env.js and overwritten at container start.
+// window.__ENV is defined in env.js and overwritten at container start.
 // -------------------------------------------------------------------
 
 declare global {
@@ -25,10 +25,9 @@ declare global {
   }
 }
 
-// Read key from runtime env
 const API_KEY = window.__ENV?.GEMINI_API_KEY || "";
 
-// Client initializer
+// Create client, throw clear error if key missing
 const getClient = () => {
   if (!API_KEY) {
     throw new Error(
@@ -38,7 +37,7 @@ const getClient = () => {
   return new GoogleGenerativeAI(API_KEY);
 };
 
-// Clean ```json ... ``` wrappers
+// Clean ```json ... ``` wrappers from model responses
 const cleanJSON = (text: string): string =>
   text.replace(/```json\s*|\s*```/g, "").trim();
 

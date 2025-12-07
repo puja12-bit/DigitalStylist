@@ -1,8 +1,9 @@
 // =====================================================================
-// FULL SERVER.JS — DIGITAL STYLIST AI
-// USER PHOTO → IMAGEN EDIT → SKETCH + REAL LOOK
-// GEMINI → PROFILE + WARDROBE + OUTFIT
-// STRICT OCCASION RULES (INTERVIEW, OFFICE, PARTY, WEDDING)
+// DIGITAL STYLIST AI - SERVER
+// - Gemini 2.0 Pro for profile + outfit (better accuracy)
+// - Gemini 2.0 Flash for wardrobe (cheaper, good enough)
+// - Imagen 3.0 capability model for user-photo editing (sketch + real)
+// - Strict occasion rules (interview/office/party/wedding)
 // =====================================================================
 
 import express from "express";
@@ -14,7 +15,7 @@ import {
   GoogleGenerativeAI,
   HarmCategory,
   HarmBlockThreshold,
-  SchemaType
+  SchemaType,
 } from "@google/generative-ai";
 
 // ------------------------------------------------------------
@@ -39,10 +40,22 @@ if (!GEMINI_KEY) console.warn("⚠ GEMINI_API_KEY missing");
 const genAI = new GoogleGenerativeAI(GEMINI_KEY || "");
 
 const safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
 ];
 
 const cleanJSON = (txt) => txt.replace(/```json|```/g, "").trim();
@@ -52,15 +65,16 @@ const cleanJSON = (txt) => txt.replace(/```json|```/g, "").trim();
 // ------------------------------------------------------------
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "digitalstylist";
 const IMAGEN_LOCATION = "us-central1";
-
-// This is the EDIT CAPABILITY MODEL — required for user-photo editing
+// Edit-capable model (user-photo editing)
 const IMAGEN_MODEL = "imagen-3.0-capability-001";
 
-// Fetch Cloud Run token
+// Cloud Run metadata token
 async function getAccessToken() {
   const res = await fetch(
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-    { headers: { "Metadata-Flavor": "Google" } }
+    {
+      headers: { "Metadata-Flavor": "Google" },
+    }
   );
 
   if (!res.ok) throw new Error("Failed to fetch identity token");
@@ -70,15 +84,20 @@ async function getAccessToken() {
 }
 
 // =======================================================================
-// 1) PROFILE ANALYSIS (GEMINI)
+// 1) PROFILE ANALYSIS (GEMINI 2.0 PRO)
 // =======================================================================
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
     const { base64Image, mimeType } = req.body;
+    if (!base64Image || !mimeType) {
+      return res
+        .status(400)
+        .json({ error: "base64Image and mimeType are required" });
+    }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      safetySettings
+      model: "gemini-2.0-pro",
+      safetySettings,
     });
 
     const schema = {
@@ -88,27 +107,29 @@ app.post("/api/analyze-profile-image", async (req, res) => {
         estimatedHeightCm: { type: SchemaType.NUMBER },
         estimatedWeightKg: { type: SchemaType.NUMBER },
         skinTone: { type: SchemaType.STRING },
-        facialFeatures: { type: SchemaType.STRING }
+        facialFeatures: { type: SchemaType.STRING },
       },
       required: [
         "gender",
         "estimatedHeightCm",
         "estimatedWeightKg",
         "skinTone",
-        "facialFeatures"
-      ]
+        "facialFeatures",
+      ],
     };
 
     const content = base64Image.split(",")[1] || base64Image;
 
     const prompt = `
-Analyze this person's physical appearance.
+You are analyzing a human's physical appearance for a fashion styling application.
+Be precise and realistic. If anything is unclear, use "uncertain" instead of guessing.
+
 Return JSON with:
-- gender
-- estimatedHeightCm
-- estimatedWeightKg
-- skinTone
-- facialFeatures
+- gender: "male", "female", or "uncertain"
+- estimatedHeightCm: number (estimate based on proportions)
+- estimatedWeightKg: number (rough estimate based on frame)
+- skinTone: ONE OF ["Fair","Light","Medium","Olive","Tan","Dark","Deep"]
+- facialFeatures: 1–2 sentences describing jawline, nose, lips, eyebrows, hairstyle, overall vibe.
 `;
 
     const result = await model.generateContent({
@@ -117,14 +138,14 @@ Return JSON with:
           role: "user",
           parts: [
             { inlineData: { data: content, mimeType } },
-            { text: prompt }
-          ]
-        }
+            { text: prompt },
+          ],
+        },
       ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema
-      }
+        responseSchema: schema,
+      },
     });
 
     const parsed = JSON.parse(cleanJSON(result.response.text()));
@@ -134,23 +155,29 @@ Return JSON with:
       heightCm: parsed.estimatedHeightCm,
       weightKg: parsed.estimatedWeightKg,
       skinTone: parsed.skinTone,
-      facialFeatures: parsed.facialFeatures
+      facialFeatures: parsed.facialFeatures,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("analyze-profile-image error", e);
+    res.status(500).json({ error: e.message || "Profile analysis failed" });
   }
 });
 
 // =======================================================================
-// 2) WARDROBE ANALYSIS (GEMINI)
+// 2) WARDROBE ANALYSIS (GEMINI 2.0 FLASH)
 // =======================================================================
 app.post("/api/analyze-wardrobe-image", async (req, res) => {
   try {
     const { base64Image, mimeType } = req.body;
+    if (!base64Image || !mimeType) {
+      return res
+        .status(400)
+        .json({ error: "base64Image and mimeType are required" });
+    }
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash",
-      safetySettings
+      safetySettings,
     });
 
     const schema = {
@@ -160,17 +187,20 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
         properties: {
           name: { type: SchemaType.STRING },
           category: { type: SchemaType.STRING },
-          color: { type: SchemaType.STRING }
+          color: { type: SchemaType.STRING },
         },
-        required: ["name", "category", "color"]
-      }
+        required: ["name", "category", "color"],
+      },
     };
 
     const content = base64Image.split(",")[1] || base64Image;
 
     const prompt = `
-Identify each clothing item.
-Return JSON: [{ name, category, color }]
+Identify every clothing item in this image.
+Return ONLY JSON array:
+[
+  { "name": "...", "category": "...", "color": "..." }
+]
 `;
 
     const result = await model.generateContent({
@@ -179,36 +209,40 @@ Return JSON: [{ name, category, color }]
           role: "user",
           parts: [
             { inlineData: { data: content, mimeType } },
-            { text: prompt }
-          ]
-        }
+            { text: prompt },
+          ],
+        },
       ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema
-      }
+        responseSchema: schema,
+      },
     });
 
     const items = JSON.parse(cleanJSON(result.response.text()));
 
     res.json(
-      items.map((x) => ({ id: Math.random().toString(36).slice(2), ...x }))
+      items.map((x) => ({
+        id: Math.random().toString(36).slice(2),
+        ...x,
+      }))
     );
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("analyze-wardrobe-image error", e);
+    res.status(500).json({ error: e.message || "Wardrobe analysis failed" });
   }
 });
 
 // =======================================================================
-// 3) OUTFIT GENERATION (GEMINI) — STRONG OCCASION RULES
+// 3) OUTFIT GENERATION (GEMINI 2.0 PRO, STRONG OCCASION RULES)
 // =======================================================================
 app.post("/api/generate-outfit", async (req, res) => {
   try {
     const { profile, wardrobe, occasion } = req.body;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      safetySettings
+      model: "gemini-2.0-pro",
+      safetySettings,
     });
 
     const itemSchema = {
@@ -218,9 +252,9 @@ app.post("/api/generate-outfit", async (req, res) => {
         description: { type: SchemaType.STRING },
         color: { type: SchemaType.STRING },
         source: { type: SchemaType.STRING, enum: ["Wardrobe", "Shopping"] },
-        reasoning: { type: SchemaType.STRING }
+        reasoning: { type: SchemaType.STRING },
       },
-      required: ["name", "description", "color", "source", "reasoning"]
+      required: ["name", "description", "color", "source", "reasoning"],
     };
 
     const responseSchema = {
@@ -234,7 +268,7 @@ app.post("/api/generate-outfit", async (req, res) => {
         hairstyleReasoning: { type: SchemaType.STRING },
         confidenceTip: { type: SchemaType.STRING },
         overallVibe: { type: SchemaType.STRING },
-        occasion: { type: SchemaType.STRING }
+        occasion: { type: SchemaType.STRING },
       },
       required: [
         "top",
@@ -244,11 +278,10 @@ app.post("/api/generate-outfit", async (req, res) => {
         "hairstyle",
         "hairstyleReasoning",
         "confidenceTip",
-        "overallVibe"
-      ]
+        "overallVibe",
+      ],
     };
 
-    // Convert wardrobe array
     const wardrobeList = (wardrobe || [])
       .map((w) => `- ${w.color} ${w.name} (${w.category})`)
       .join("\n");
@@ -258,52 +291,84 @@ app.post("/api/generate-outfit", async (req, res) => {
 
     if (o.includes("interview")) {
       occasionRules = `
-INTERVIEW RULES:
-- NO shiny clothing
-- NO ethnic-wear sets (kurta pajama, sherwani, lehenga)
-- MUST be professional: shirts, blouses, blazers, trousers, pencil skirts
-- Colors: navy, black, grey, beige, white
-- Shoes: formal closed-toe
+OCCASION CATEGORY: JOB INTERVIEW
+
+RULES:
+- MUST look professional, serious, and reliable.
+- FORBIDDEN: shiny fabrics, sequins, glitter, heavy embroidery, wedding-style ethnic sets.
+- FORBIDDEN: kurta pajama, sherwani, lehenga, anarkali, or similar festive outfits.
+- ALLOWED: shirts, blouses, blazers, trousers, chinos, pencil skirts, sheath dresses.
+- COLORS: navy, black, grey, beige, white, soft muted colors. Avoid loud/neon colors.
+- SHOES: formal closed-toe, clean, minimal.
 `;
     } else if (o.includes("office") || o.includes("work")) {
       occasionRules = `
-OFFICE RULES:
-- Smart but comfortable
-- NO wedding-level shine or sequins
-- Simple kurtas OK only if minimal and elegant
+OCCASION CATEGORY: OFFICE / WORK
+
+RULES:
+- Polished but comfortable.
+- FORBIDDEN: wedding-style ethnic sets, heavy shine or sequins.
+- ALLOWED: shirts, blouses, smart casual kurtas (plain/minimal), trousers, chinos, straight pants, modest dresses.
+- SHOES: loafers, flats, low heels, clean sneakers (only if "casual" tone).
 `;
-    } else if (o.includes("party") || o.includes("wedding") || o.includes("festive")) {
+    } else if (
+      o.includes("party") ||
+      o.includes("wedding") ||
+      o.includes("festive")
+    ) {
       occasionRules = `
-FESTIVE RULES:
-- Ethnic wear allowed
-- Color, shine OK
+OCCASION CATEGORY: FESTIVE / WEDDING / PARTY
+
+RULES:
+- Ethnic wear, color and shine are allowed.
+- Still keep it tasteful, not costume-like.
+- Match vibe: elegant, confident, not overdone.
+`;
+    } else if (o.includes("date")) {
+      occasionRules = `
+OCCASION CATEGORY: DATE
+
+RULES:
+- Flattering silhouette, comfortable, confident.
+- Avoid overly formal or overly sporty outfits.
+- Choose colors that flatter the user's skin tone.
 `;
     }
 
     const prompt = `
 You are a professional stylist.
 
-PROFILE:
-${profile.gender}, ${profile.heightCm}cm, ${profile.weightKg}kg
-Skin tone: ${profile.skinTone}
-Face: ${profile.facialFeatures}
+USER PROFILE:
+- Gender: ${profile.gender || "unknown"}
+- Height: ${profile.heightCm || "unknown"} cm
+- Weight: ${profile.weightKg || "unknown"} kg
+- Skin tone: ${profile.skinTone || "unknown"}
+- Face / vibe: ${profile.facialFeatures || "unknown"}
 
-OCCASION: "${occasion}"
+OCCASION (user text): "${occasion}"
+
 ${occasionRules}
 
-WARDROBE:
-${wardrobeList || "(no wardrobe)"}
+WARDROBE (USE THESE FIRST):
+${wardrobeList || "(empty wardrobe — may need Shopping items)"}
 
 HARD RULES:
-1. Outfit MUST match occasion rules.
-2. Use wardrobe first, only use Shopping when necessary.
-3. NO non-occasion-appropriate items.
-4. RETURN ONLY JSON (exact schema).
+1. The outfit MUST clearly fit the occasion rules above.
+2. For interviews / office:
+   - NO shiny / glittery / heavily embroidered / wedding outfits.
+   - NO kurta pajama / sherwani / lehenga / anarkali unless occasion explicitly says traditional or wedding.
+3. Use wardrobe items first. Only mark an item as "Shopping" when the wardrobe truly lacks that category (e.g. no formal shoes).
+4. Colors and descriptions must be consistent with the items you list.
+5. Explain reasoning for each item briefly (why it fits the occasion and the user's body/skin tone).
+6. Return ONLY valid JSON in the exact response schema. No markdown, no prose, no comments.
 `;
 
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", responseSchema }
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema,
+      },
     });
 
     const parsed = JSON.parse(cleanJSON(result.response.text()));
@@ -311,46 +376,74 @@ HARD RULES:
 
     res.json(parsed);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("generate-outfit error", e);
+    res.status(500).json({ error: e.message || "Outfit generation failed" });
   }
 });
 
 // =======================================================================
-// 4) IMAGEN EDIT — USER PHOTO → SKETCH + REAL LOOK
+// 4) IMAGEN EDIT — USER PHOTO → FASHION SKETCH + REAL LOOK
 // =======================================================================
 app.post("/api/outfit-image", async (req, res) => {
   try {
     const { profile, recommendation, mode } = req.body;
 
-    if (!profile?.avatarImage)
-      return res.status(400).json({ error: "Missing profile.avatarImage" });
+    if (!profile?.avatarImage) {
+      return res.status(400).json({ error: "profile.avatarImage is required" });
+    }
 
-    if (mode !== "sketch" && mode !== "real")
-      return res.status(400).json({ error: "Mode must be sketch or real" });
+    if (mode !== "sketch" && mode !== "real") {
+      return res
+        .status(400)
+        .json({ error: "mode must be 'sketch' or 'real'" });
+    }
 
     const avatarBase64 =
       profile.avatarImage.split(",")[1] || profile.avatarImage;
 
+    const top = recommendation?.top || {};
+    const bottom = recommendation?.bottom || {};
+    const shoes = recommendation?.shoes || {};
+    const accessory = recommendation?.accessory || {};
+
     const editPrompt = `
-Change ONLY the clothing on this person.
+You are modifying ONLY the clothing on this person for a fashion styling app.
 
-OUTFIT:
-Top: ${recommendation.top.color} ${recommendation.top.name}
-Bottom: ${recommendation.bottom.color} ${recommendation.bottom.name}
-Shoes: ${recommendation.shoes.color} ${recommendation.shoes.name}
-Accessory: ${recommendation.accessory.name}
+KEEP EXACTLY:
+- Face, facial expression
+- Body shape and proportions
+- Pose
+- Background and lighting
+- Overall identity and skin tone
 
-RULES:
-- KEEP face, body, pose, lighting, background EXACTLY SAME.
-- Only change clothing.
+CHANGE ONLY:
+- Clothing (top, bottom, shoes, accessory)
+
+OUTFIT SPECIFICATION (STRICT):
+- Top: ${top.color || ""} ${top.name || ""}. Style: ${
+      top.description || ""
+    }
+- Bottom: ${bottom.color || ""} ${bottom.name || ""}. Style: ${
+      bottom.description || ""
+    }
+- Shoes: ${shoes.color || ""} ${shoes.name || ""}. Style: ${
+      shoes.description || ""
+    }
+- Accessory: ${accessory.name || ""}. Style: ${accessory.description || ""}
+
+IMAGE QUALITY RULES:
+- Clothes must be clearly visible and distinct from skin.
+- The outline of each garment (shirt, trousers, skirt, dress) must be clean and readable.
+- No color bleeding, no weird overlapping textures.
+- No distortions on hands, face or feet.
 `;
 
     const stylePrompt =
       mode === "sketch"
-        ? "Render as high-end fashion illustration, white background."
-        : "Render photorealistic, studio quality.";
+        ? "Render as a clean high-end fashion illustration, white or very light background, clear lines, subtle colors."
+        : "Render as a crisp photorealistic full-body fashion photo, studio-quality lighting, neutral background.";
 
-    const finalPrompt = `${editPrompt}\n\nStyle: ${stylePrompt}`;
+    const finalPrompt = `${editPrompt}\n\nSTYLE:\n${stylePrompt}`;
 
     const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
 
@@ -364,51 +457,62 @@ RULES:
             {
               referenceType: "REFERENCE_TYPE_RAW",
               referenceId: 1,
-              referenceImage: { bytesBase64Encoded: avatarBase64 }
-            }
-          ]
-        }
+              referenceImage: { bytesBase64Encoded: avatarBase64 },
+            },
+          ],
+        },
       ],
       parameters: {
         sampleCount: 1,
         personGeneration: "allow_adult",
-        outputOptions: { mimeType: "image/png" }
-      }
+        outputOptions: { mimeType: "image/png" },
+      },
     };
 
     const resp = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     const json = await resp.json();
 
-    if (!resp.ok) return res.status(500).json({ error: json });
+    if (!resp.ok) {
+      console.error("Imagen error", resp.status, json);
+      return res.status(500).json({
+        error: `Imagen error ${resp.status}`,
+        details: json,
+      });
+    }
 
     const pred = json.predictions?.[0];
-    if (!pred?.bytesBase64Encoded)
-      return res.status(500).json({ error: "No image returned" });
+    if (!pred?.bytesBase64Encoded) {
+      console.error("Imagen: no image in response", json);
+      return res.status(500).json({ error: "No image returned from Imagen" });
+    }
 
     res.json({
-      imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}`
+      imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}`,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("outfit-image error", e);
+    res.status(500).json({ error: e.message || "Outfit image generation failed" });
   }
 });
 
 // =======================================================================
-// FRONTEND FALLBACK
+// SPA FALLBACK
 // =======================================================================
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
 // =======================================================================
-// START SERVER
+// START
 // =======================================================================
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});

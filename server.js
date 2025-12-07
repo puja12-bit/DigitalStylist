@@ -40,10 +40,9 @@ const cleanJSON = (text) => text.replace(/```json\s*|\s*```/g, "").trim();
 // ---------- VERTEX IMAGEN CONFIG ----------
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "digitalstylist";
 const IMAGEN_LOCATION = process.env.IMAGEN_LOCATION || "us-central1";
-// Pick a real Imagen model version (fast is cheapish)
 const IMAGEN_MODEL = "imagen-3.0-fast-generate-001";
 
-// Cloud Run has global fetch + metadata server
+// Cloud Run has metadata server for access tokens
 async function getAccessToken() {
   const res = await fetch(
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
@@ -307,7 +306,7 @@ app.post("/api/generate-outfit", async (req, res) => {
 //    via Vertex Imagen text-to-image
 // ======================================================
 app.post("/api/outfit-image", async (req, res) => {
-  try:
+  try {
     const { profile, recommendation, mode } = req.body;
 
     if (!profile || !recommendation || !mode) {

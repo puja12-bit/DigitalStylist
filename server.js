@@ -45,7 +45,7 @@ app.post("/api/analyze-profile-image", async (req, res) => {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       safetySettings
     });
 
@@ -122,7 +122,7 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       safetySettings
     });
 
@@ -191,7 +191,7 @@ app.post("/api/generate-outfit", async (req, res) => {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       safetySettings
     });
 

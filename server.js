@@ -14,21 +14,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ---- basic middleware ----
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
-// ---- static frontend from dist ----
+// Serve built frontend
 app.use(express.static(path.join(__dirname, "dist")));
 
-// ---- Gemini client ----
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   console.warn("WARNING: GEMINI_API_KEY is not set – all API routes will fail.");
 }
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
-// shared safety settings
 const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -38,12 +35,10 @@ const safetySettings = [
 
 const cleanJSON = (text) => text.replace(/```json\s*|\s*```/g, "").trim();
 
-// ------------------------------------------------------------------
-// 1) Analyze profile photo
-// ------------------------------------------------------------------
+// ---------------- 1) Analyze profile image ----------------
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
-    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not set" });
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set on server");
     const { base64Image, mimeType } = req.body;
     if (!base64Image || !mimeType) {
       return res.status(400).json({ error: "base64Image and mimeType required" });
@@ -74,9 +69,9 @@ app.post("/api/analyze-profile-image", async (req, res) => {
 
     const prompt =
       "You are a styling assistant. Analyze this person's appearance ONLY from the photo. " +
-      "Estimate ALL of: gender (Male/Female/Non-Binary), estimatedHeightCm (number), estimatedWeightKg (number), " +
+      "Estimate gender, estimatedHeightCm (number), estimatedWeightKg (number), " +
       "skinTone (Fair, Light, Medium, Olive, Tan, Dark, Deep), and facialFeatures (short description). " +
-      "Always return valid JSON matching the schema, never 'unknown'.";
+      "Always return valid JSON matching the schema.";
 
     const base64Content = base64Image.split(",")[1] || base64Image;
 
@@ -113,16 +108,14 @@ app.post("/api/analyze-profile-image", async (req, res) => {
     });
   } catch (err) {
     console.error("analyze-profile-image error:", err);
-    res.status(500).json({ error: "Failed to analyze profile image" });
+    res.status(500).json({ error: err?.message || "Failed to analyze profile image" });
   }
 });
 
-// ------------------------------------------------------------------
-// 2) Analyze wardrobe photo
-// ------------------------------------------------------------------
+// ---------------- 2) Analyze wardrobe image ----------------
 app.post("/api/analyze-wardrobe-image", async (req, res) => {
   try {
-    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not set" });
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set on server");
     const { base64Image, mimeType } = req.body;
     if (!base64Image || !mimeType) {
       return res.status(400).json({ error: "base64Image and mimeType required" });
@@ -148,8 +141,7 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
 
     const prompt =
       "Identify all clothing items in this image for a wardrobe manager. " +
-      "For each item, return name, category, and color. " +
-      "Return ONLY JSON array.";
+      "For each item, return name, category, and color. Return ONLY JSON array.";
 
     const base64Content = base64Image.split(",")[1] || base64Image;
 
@@ -185,17 +177,14 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
     res.json(mapped);
   } catch (err) {
     console.error("analyze-wardrobe-image error:", err);
-    res.status(500).json({ error: "Failed to analyze wardrobe image" });
+    res.status(500).json({ error: err?.message || "Failed to analyze wardrobe image" });
   }
 });
 
-// ------------------------------------------------------------------
-// 3) Generate outfit (text)
-// ------------------------------------------------------------------
+// ---------------- 3) Generate outfit (text) ----------------
 app.post("/api/generate-outfit", async (req, res) => {
   try {
-    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not set" });
-
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set on server");
     const { profile, wardrobe, occasion } = req.body;
     if (!profile || !wardrobe || !occasion) {
       return res.status(400).json({ error: "profile, wardrobe, occasion required" });
@@ -260,7 +249,7 @@ app.post("/api/generate-outfit", async (req, res) => {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: responseSchema
+        responseSchema
       }
     });
 
@@ -270,17 +259,14 @@ app.post("/api/generate-outfit", async (req, res) => {
     res.json(outfit);
   } catch (err) {
     console.error("generate-outfit error:", err);
-    res.status(500).json({ error: "Failed to generate outfit" });
+    res.status(500).json({ error: err?.message || "Failed to generate outfit" });
   }
 });
 
-// ------------------------------------------------------------------
-// 4) Generate outfit image (fashion sketch / real look)
-// ------------------------------------------------------------------
+// ---------------- 4) Generate outfit image ----------------
 app.post("/api/outfit-image", async (req, res) => {
   try {
-    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not set" });
-
+    if (!apiKey) throw new Error("GEMINI_API_KEY not set on server");
     const { profile, recommendation, mode } = req.body;
     if (!profile?.avatarImage || !recommendation || !mode) {
       return res
@@ -358,13 +344,11 @@ app.post("/api/outfit-image", async (req, res) => {
     res.json({ imageDataUrl });
   } catch (err) {
     console.error("outfit-image error:", err);
-    res.status(500).json({ error: "Failed to generate outfit image" });
+    res.status(500).json({ error: err?.message || "Failed to generate outfit image" });
   }
 });
 
-// ------------------------------------------------------------------
-// SPA fallback – return index.html for everything else
-// ------------------------------------------------------------------
+// SPA fallback
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });

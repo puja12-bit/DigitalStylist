@@ -100,26 +100,32 @@ export const generateOutfit = async (
 // This function maps between them.
 //
 export const generateOutfitImage = async (
-  recommendation: OutfitRecommendation,
+  mode: "sketch" | "real",
   profile: UserProfile,
-  mode: "2D" | "REAL"
+  outfit: OutfitRecommendation
 ): Promise<string | null> => {
   try {
-    if (!profile.avatarImage) {
-      throw new Error("No profile image available for visualization.");
+    const res = await fetch("/api/outfit-image", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode, profile, outfit }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Outfit image API failed", res.status, text);
+      return null;
     }
 
-    const backendMode =
-      mode === "2D" ? "FASHION_SKETCH" : "REAL_LOOK";
-
-    const data = await postJson<{ imageDataUrl: string }>(
-      "/api/outfit-image",
-      {
-        recommendation,
-        profile,
-        mode: backendMode
-      }
-    );
+    const json = (await res.json()) as { imageDataUrl?: string };
+    return json.imageDataUrl || null;
+  } catch (err) {
+    console.error("generateOutfitImage error", err);
+    return null;
+  }
+};
 
     if (!data.imageDataUrl) {
       throw new Error("Server did not return an image.");

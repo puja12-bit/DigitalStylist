@@ -1,9 +1,11 @@
 // =====================================================================
 // DIGITAL STYLIST AI - SERVER
+// =====================================================================
 // - Gemini 2.0 Pro for profile + outfit (better accuracy)
 // - Gemini 2.0 Flash for wardrobe (cheaper, good enough)
 // - Imagen 3.0 capability model for user-photo editing (sketch + real)
-// - Strict occasion rules (interview/office/party/wedding)
+// - Strict occasion rules (interview/office/party/wedding/date)
+// - Robust profile analysis route with SAFE FALLBACK (no 500s)
 // =====================================================================
 
 import express from "express";
@@ -84,19 +86,37 @@ async function getAccessToken() {
 }
 
 // =======================================================================
-// 1) PROFILE ANALYSIS (GEMINI 2.0 PRO)
+// 1) PROFILE ANALYSIS (GEMINI 2.0 PRO) — ROBUST + SAFE FALLBACK
 // =======================================================================
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
-    console.log("DEBUG analyze-profile-image body:", Object.keys(req.body));
+    const raw = req.body || {};
+    console.log("analyze-profile-image body keys:", Object.keys(raw));
 
-    const { base64Image, mimeType } = req.body;
+    let base64Image =
+      raw.base64Image ||
+      raw.imageBase64 ||
+      raw.imageDataUrl ||
+      raw.image ||
+      null;
 
-    if (!base64Image || !mimeType) {
-      return res
-        .status(400)
-        .json({ error: "base64Image and mimeType are required" });
+    let mimeType =
+      raw.mimeType ||
+      raw.type ||
+      (typeof base64Image === "string"
+        ? (base64Image.match(/^data:(.*?);base64,/) || [])[1]
+        : null) ||
+      "image/jpeg";
+
+    if (!base64Image) {
+      console.warn("No base64Image in request body");
+      return res.status(400).json({
+        error:
+          "Missing image data. Expected base64Image / imageBase64 / imageDataUrl.",
+      });
     }
+
+    const content = base64Image.split(",")[1] || base64Image;
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-pro",
@@ -121,16 +141,14 @@ app.post("/api/analyze-profile-image", async (req, res) => {
       ],
     };
 
-    const content = base64Image.split(",")[1] || base64Image;
-
     const prompt = `
 You are analyzing a human's physical appearance for a fashion styling application.
 Be precise and realistic. If anything is unclear, use "uncertain" instead of guessing.
 
 Return JSON with:
 - gender: "male", "female", or "uncertain"
-- estimatedHeightCm: number (estimate based on proportions)
-- estimatedWeightKg: number (rough estimate based on frame)
+- estimatedHeightCm: number
+- estimatedWeightKg: number
 - skinTone: ONE OF ["Fair","Light","Medium","Olive","Tan","Dark","Deep"]
 - facialFeatures: 1–2 sentences describing jawline, nose, lips, eyebrows, hairstyle, overall vibe.
 `;
@@ -153,7 +171,7 @@ Return JSON with:
 
     const parsed = JSON.parse(cleanJSON(result.response.text()));
 
-    res.json({
+    return res.json({
       gender: parsed.gender,
       heightCm: parsed.estimatedHeightCm,
       weightKg: parsed.estimatedWeightKg,
@@ -161,8 +179,18 @@ Return JSON with:
       facialFeatures: parsed.facialFeatures,
     });
   } catch (e) {
-    console.error("analyze-profile-image error", e);
-    res.status(500).json({ error: e.message || "Profile analysis failed" });
+    console.error("analyze-profile-image hard error:", e);
+
+    // DO NOT KILL THE FLOW. Return safe fallback so UI continues.
+    return res.status(200).json({
+      gender: "uncertain",
+      heightCm: 170,
+      weightKg: 65,
+      skinTone: "Medium",
+      facialFeatures:
+        "Auto-analysis failed. Please adjust gender, height, weight and facial details manually.",
+      _warning: e?.message || "Profile analysis failed; fallback values used.",
+    });
   }
 });
 
@@ -178,10 +206,10 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
         .json({ error: "base64Image and mimeType are required" });
     }
 
-    const model = genAI.getGenerativeModel({
+    const model = genAI.getGenerativeAIModel?.({
       model: "gemini-2.0-flash",
       safetySettings,
-    });
+    }) ?? genAI.getGenerativeModel({ model: "gemini-2.0-flash", safetySettings });
 
     const schema = {
       type: SchemaType.ARRAY,
@@ -502,7 +530,9 @@ IMAGE QUALITY RULES:
     });
   } catch (e) {
     console.error("outfit-image error", e);
-    res.status(500).json({ error: e.message || "Outfit image generation failed" });
+    res
+      .status(500)
+      .json({ error: e.message || "Outfit image generation failed" });
   }
 });
 

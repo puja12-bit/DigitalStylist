@@ -1,176 +1,82 @@
-// server.ts (or server.js)
-
-import express from "express";
-import cors from "cors";
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { GoogleAuth } from 'google-auth-library';
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+const port = 8080;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// ─── CONFIG ──────────────────────────────────────────────
+// Allow large requests
+app.use(express.json({ limit: '10mb' }));
 
-const PROJECT_ID =
-  process.env.GOOGLE_CLOUD_PROJECT || "digitalstylist"; // Cloud Run sets this
-const IMAGEN_REGION = "us-central1"; // Imagen is definitely available here
+// Serve the React App
+app.use(express.static(path.join(__dirname, 'dist')));
 
-// Strip "data:image/...;base64," prefix if present
-function stripDataUrl(dataUrl: string): string {
-  if (!dataUrl) return "";
-  const commaIndex = dataUrl.indexOf(",");
-  return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
-}
-
-// Get access token from metadata server (Cloud Run default SA)
-async function getAccessToken(): Promise<string> {
-  const res = await fetch(
-    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-    {
-      headers: { "Metadata-Flavor": "Google" },
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Metadata token error ${res.status}: ${text || res.statusText}`
-    );
-  }
-
-  const json = (await res.json()) as { access_token?: string };
-  if (!json.access_token) throw new Error("No access_token from metadata");
-  return json.access_token;
-}
-
-// ─── NEW ROUTE: /api/outfit-image ────────────────────────
-// This will be called by "Fashion Sketch" and "Real Look" tabs.
-
-app.post("/api/outfit-image", async (req, res) => {
+// --- THE CLOUD CREDITS API ---
+app.post('/api/generate-image', async (req, res) => {
   try {
-    const { mode, profile, outfit } = req.body;
+    const { prompt, style } = req.body;
+    
+    // 1. Authenticate using your $300 Credits (Cloud Run Identity)
+    const auth = new GoogleAuth({
+      scopes: 'https://www.googleapis.com/auth/cloud-platform'
+    });
+    const client = await auth.getClient();
+    const projectId = await auth.getProjectId();
+    const accessToken = await client.getAccessToken();
 
-    if (mode !== "sketch" && mode !== "real") {
-      return res.status(400).json({ error: "mode must be 'sketch' or 'real'" });
+    // 2. Define the Style Prompt
+    let styleModifier = "";
+    if (style === '2D') {
+      styleModifier = "Style: Professional fashion design illustration. Medium: Copic markers and ink. Background: Clean white. High fashion sketch style.";
+    } else {
+      styleModifier = "Style: Photorealistic, 4k, Cinematic fashion photography. Lighting: Studio softbox. Quality: Highly detailed, realistic textures.";
     }
-    if (!profile || !outfit) {
-      return res
-        .status(400)
-        .json({ error: "profile and outfit are required in body" });
-    }
 
-    // Build a strong text prompt for Imagen
-    const basePrompt = `
-      Full-body view of a person for a fashion styling app.
+    const finalPrompt = `${styleModifier} ${prompt}`;
 
-      Person details:
-      - Gender: ${profile.gender || "unspecified"}
-      - Height: ${profile.heightCm || "unknown"} cm
-      - Weight: ${profile.weightKg || "unknown"} kg
-      - Skin tone: ${profile.skinTone || "unspecified"}
-      - Facial features: ${profile.facialFeatures || "soft, natural"}
+    // 3. Call Vertex AI (Imagen 3)
+    const endpoint = `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectId}/locations/us-central1/publishers/google/models/imagen-3.0-generate-001:predict`;
 
-      Outfit details:
-      - Top: ${outfit.top?.name || ""}, ${outfit.top?.color || ""}, ${
-      outfit.top?.description || ""
-    }
-      - Bottom: ${outfit.bottom?.name || ""}, ${outfit.bottom?.color || ""}, ${
-      outfit.bottom?.description || ""
-    }
-      - Shoes: ${outfit.shoes?.name || ""}, ${outfit.shoes?.color || ""}, ${
-      outfit.shoes?.description || ""
-    }
-      - Accessory: ${
-        outfit.accessory?.name || ""
-      }, ${outfit.accessory?.description || ""}
-
-      Occasion: ${outfit.occasion || "daily wear"}.
-    `.trim();
-
-    const stylePrompt =
-      mode === "sketch"
-        ? "Clean high-end fashion illustration, line art with subtle color, on a plain background, like a style board sketch."
-        : "Ultra realistic 4K studio fashion photography, soft lighting, professional model, neutral background.";
-
-    const finalPrompt = `${basePrompt}\n\nStyle: ${stylePrompt}`;
-
-    // Imagen text-to-image endpoint
-    const modelId = "imagegeneration"; // base Imagen model family
-    const url = `https://${IMAGEN_REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_REGION}/publishers/google/models/${modelId}:predict`;
-
-    const token = await getAccessToken();
-
-    // NOTE: This JSON shape follows the Imagen predict docs.
-    // If Google tweaks it, adjust using the docs – but the pattern is:
-    //   instances: [{ prompt: "..." }], parameters: { ... }
-    const body = {
-      instances: [
-        {
-          // Some versions use { "prompt": "text..." }, others { "prompt": { "text": "..." } }.
-          // If the first form fails, change to { prompt: { text: finalPrompt } }.
-          prompt: finalPrompt,
-        },
-      ],
-      parameters: {
-        sampleCount: 1,
-        // safer settings to start with:
-        addWatermark: true,
-        aspectRatio: "1:1", // or "9:16" for vertical
-        // you can add other parameters later (seed, negativePrompt, etc.)
-        outputOptions: {
-          mimeType: "image/png",
-        },
-      },
-    };
-
-    const imagenRes = await fetch(url, {
-      method: "POST",
+    const response = await fetch(endpoint, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        'Authorization': `Bearer ${accessToken.token}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        instances: [{ prompt: finalPrompt }],
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: "9:16", // Full body portrait
+          personGeneration: "allow_adult" // Essential for fashion models
+        }
+      })
     });
 
-    const json = await imagenRes.json();
+    const data = await response.json();
 
-    if (!imagenRes.ok) {
-      console.error("Imagen error", imagenRes.status, json);
-      return res
-        .status(500)
-        .json({ error: `Imagen error ${imagenRes.status}: ${JSON.stringify(json)}` });
+    if (data.predictions && data.predictions[0]) {
+      const base64Image = data.predictions[0].bytesBase64Encoded;
+      res.json({ success: true, image: `data:image/png;base64,${base64Image}` });
+    } else {
+      console.error("Vertex AI Error:", JSON.stringify(data));
+      res.status(500).json({ error: "Image generation failed at Vertex AI." });
     }
 
-    const prediction =
-      json.predictions && json.predictions.length > 0
-        ? json.predictions[0]
-        : null;
-
-    if (!prediction || !prediction.bytesBase64Encoded) {
-      console.error("Unexpected Imagen response", json);
-      return res
-        .status(500)
-        .json({ error: "Imagen response did not contain image bytes" });
-    }
-
-    const mime =
-      prediction.mimeType && typeof prediction.mimeType === "string"
-        ? prediction.mimeType
-        : "image/png";
-
-    const dataUrl = `data:${mime};base64,${prediction.bytesBase64Encoded}`;
-
-    return res.json({ imageDataUrl: dataUrl });
-  } catch (err: any) {
-    console.error("Outfit image generation failed", err);
-    return res
-      .status(500)
-      .json({ error: err.message || "Failed to generate outfit image" });
+  } catch (error) {
+    console.error("Server Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ─── existing routes (analyze-profile-image, analyze-wardrobe-image, generate-outfit) stay as they are ───
+// Handle React Routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
 
-// Start server (in Cloud Run Dockerfile you already expose PORT)
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`Server listening on ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });

@@ -1,292 +1,206 @@
-import React, { useState } from "react";
-import { OutfitRecommendation, RecommendedItem } from "../types";
+import React from "react";
+import {
+  UserProfile,
+  OutfitRecommendation,
+} from "../types";
 
-interface Props {
-  result: OutfitRecommendation;
-  generatedImage2D: string | null;
+type Props = {
+  profile: UserProfile;
+  recommendation: OutfitRecommendation;
+  generatedImage: string | null;
   generatedImageReal: string | null;
   isGenerating2D: boolean;
-  onReset: () => void;
   onGenerateReal: () => void;
-}
-
-const ItemCard: React.FC<{
-  item: RecommendedItem;
-  type: string;
-  isShopping?: boolean;
-}> = ({ item, type, isShopping }) => {
-  const searchUrl = (site: string) => {
-    const query = encodeURIComponent(`${item.color} ${item.name} ${type}`);
-    if (site === "amazon") return `https://www.amazon.com/s?k=${query}`;
-    if (site === "myntra")
-      return `https://www.myntra.com/${query.replace(/%20/g, "-")}`;
-    if (site === "ajio") return `https://www.ajio.com/search/?text=${query}`;
-    return "#";
-  };
-
-  // 🔹 Avoid "Mauve Mauve ..." when the name already starts with the color
-  const displayName = item.name
-    ? item.name.toLowerCase().startsWith(item.color?.toLowerCase() || "")
-      ? item.name
-      : `${item.color} ${item.name}`
-    : item.color || "";
-
-  return (
-    <div className="rounded-2xl bg-neutral-900/40 border border-neutral-700/60 p-4 flex flex-col gap-2">
-      <div className="flex items-center justify-between text-xs uppercase tracking-wide text-neutral-400">
-        <span>{type}</span>
-        {isShopping ? (
-          <span className="px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-300 border border-primary-500/30">
-            Shopping
-          </span>
-        ) : (
-          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-            Wardrobe
-          </span>
-        )}
-      </div>
-
-      <h3 className="text-sm font-semibold text-neutral-50">{displayName}</h3>
-
-      <p className="text-xs text-neutral-300 leading-relaxed">
-        {item.description}
-      </p>
-
-      {/* Reasoning bubble */}
-      {item.reasoning && (
-        <div className="mt-1 text-xs italic text-neutral-300 bg-neutral-900/80 border border-neutral-700/70 rounded-xl px-3 py-2">
-          “{item.reasoning}”
-        </div>
-      )}
-
-      {isShopping && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="text-neutral-400">Buy online:</span>
-          <a
-            href={searchUrl("amazon")}
-            target="_blank"
-            rel="noreferrer"
-            className="underline text-primary-300 hover:text-primary-200"
-          >
-            Amazon
-          </a>
-          <a
-            href={searchUrl("myntra")}
-            target="_blank"
-            rel="noreferrer"
-            className="underline text-primary-300 hover:text-primary-200"
-          >
-            Myntra
-          </a>
-          <a
-            href={searchUrl("ajio")}
-            target="_blank"
-            rel="noreferrer"
-            className="underline text-primary-300 hover:text-primary-200"
-          >
-            Ajio
-          </a>
-        </div>
-      )}
-    </div>
-  );
+  onBack: () => void;
 };
 
 const ResultDisplay: React.FC<Props> = ({
-  result,
-  generatedImage2D,
+  profile,
+  recommendation,
+  generatedImage,
   generatedImageReal,
   isGenerating2D,
-  onReset,
   onGenerateReal,
+  onBack,
 }) => {
-  const [viewMode, setViewMode] = useState<"2D" | "REAL">("2D");
-  const [isGeneratingReal, setIsGeneratingReal] = useState(false);
+  const [viewMode, setViewMode] = React.useState<"2D" | "REAL">("2D");
 
-  const handleModeChange = (mode: "2D" | "REAL") => {
-    setViewMode(mode);
-    if (mode === "REAL" && !generatedImageReal) {
-      setIsGeneratingReal(true);
-      setTimeout(() => onGenerateReal(), 100);
-    }
-  };
+  const activeImage =
+    viewMode === "2D" ? generatedImage : generatedImageReal;
 
-  const currentImage = viewMode === "2D" ? generatedImage2D : generatedImageReal;
-  const isLoadingReal = viewMode === "REAL" && !generatedImageReal && isGeneratingReal;
-  const isLoading2D = viewMode === "2D" && isGenerating2D;
-
-  // Flatten outfit parts
-  const allItems = [
-    { ...result.top, type: "Top" },
-    { ...result.bottom, type: "Bottom" },
-    { ...result.shoes, type: "Shoes" },
-    { ...result.accessory, type: "Accessory" },
-  ];
-
-  const shoppingItems = allItems.filter((i) => i.source === "Shopping");
-  const wardrobeItems = allItems.filter((i) => i.source === "Wardrobe");
+  const hasReal = Boolean(generatedImageReal);
 
   return (
-    <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)] gap-6 lg:gap-8">
-      {/* 1. Header */}
-      <div className="lg:col-span-2 flex flex-col gap-3">
-        <h2 className="text-xl font-semibold text-neutral-50">
-          The Confidence Look
-        </h2>
-        <p className="text-sm text-neutral-300 italic">“{result.overallVibe}”</p>
-        <p className="text-sm text-primary-200">
-          ✨ {result.confidenceTip}
-        </p>
-      </div>
-
-      {/* 2. Visual section */}
-      <div className="rounded-3xl bg-neutral-900/60 border border-neutral-700/70 p-4 lg:p-5 flex flex-col gap-4">
-        {/* Tabs */}
-        <div className="flex gap-2 bg-neutral-900/60 rounded-2xl p-1">
-          <button
-            onClick={() => handleModeChange("2D")}
-            className={`flex-1 py-2.5 text-xs font-semibold rounded-xl transition-all ${
-              viewMode === "2D"
-                ? "bg-white text-neutral-900 shadow-sm"
-                : "text-neutral-400 hover:text-neutral-100"
-            }`}
-          >
-            Fashion Sketch
-          </button>
-          <button
-            onClick={() => handleModeChange("REAL")}
-            className={`flex-1 py-2.5 text-xs font-semibold rounded-xl transition-all ${
-              viewMode === "REAL"
-                ? "bg-white text-neutral-900 shadow-sm"
-                : "text-neutral-400 hover:text-neutral-100"
-            }`}
-          >
-            Real Look
-          </button>
-        </div>
-
-        {/* Image area */}
-        <div className="flex-1 rounded-2xl border border-dashed border-neutral-700/70 bg-neutral-950/50 flex flex-col items-center justify-center px-4 py-6 text-center">
-          {isLoadingReal ? (
-            <>
-              <h3 className="text-sm font-semibold text-neutral-50 mb-1">
-                Generating Realism...
-              </h3>
-              <p className="text-xs text-neutral-300">
-                Creating a 4K photorealistic render based on your profile.
-              </p>
-            </>
-          ) : isLoading2D ? (
-            <>
-              <div className="text-2xl mb-1">✏️</div>
-              <h3 className="text-sm font-semibold text-neutral-50 mb-1">
-                Sketching Outfit...
-              </h3>
-              <p className="text-xs text-neutral-300">
-                Our AI artist is drawing your look.
-              </p>
-            </>
-          ) : currentImage ? (
-            <img
-              src={currentImage}
-              alt={viewMode === "2D" ? "AI fashion sketch" : "AI real look"}
-              className="max-h-80 w-auto rounded-2xl object-contain"
-            />
-          ) : (
-            <>
-              <div className="text-4xl mb-2">🖼️</div>
-              <p className="text-xs text-neutral-400">
-                Select a mode to view.
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Mode badge + grooming */}
-        <div className="flex flex-col gap-3">
-          <span className="inline-flex self-start px-3 py-1 rounded-full bg-neutral-900/80 border border-neutral-700/60 text-[11px] uppercase tracking-wide text-neutral-400">
-            {viewMode === "2D" ? "AI Sketch Mode" : "AI Realism Mode"}
-          </span>
-
-          <div>
-            <h4 className="text-xs font-semibold text-neutral-200 mb-1">
-              Grooming Advice
-            </h4>
-            <p className="text-xs text-neutral-200 mb-1">{result.hairstyle}</p>
-            <p className="text-xs text-neutral-400">
-              {result.hairstyleReasoning}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Details / items */}
-      <div className="flex flex-col gap-5">
-        {/* Wardrobe */}
-        <section className="rounded-3xl bg-neutral-900/60 border border-neutral-700/70 p-4 lg:p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 text-xs">
-              ✓
-            </span>
-            <h3 className="text-sm font-semibold text-neutral-50">
-              From Your Wardrobe
-            </h3>
-          </div>
-
-          {wardrobeItems.length > 0 ? (
-            <div className="grid gap-3">
-              {wardrobeItems.map((item, idx) => (
-                <ItemCard
-                  key={`${item.name}-${idx}-wardrobe`}
-                  item={item}
-                  type={item.type}
-                  isShopping={false}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-neutral-400">
-              No suitable items found in your wardrobe for this specific look.
-            </p>
-          )}
-        </section>
-
-        {/* Shopping */}
-        {shoppingItems.length > 0 && (
-          <section className="rounded-3xl bg-neutral-900/60 border border-neutral-700/70 p-4 lg:p-5 flex flex-col gap-4">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary-500/15 text-primary-300 text-xs">
-                🛍️
-              </span>
-            </div>
-            <h3 className="text-sm font-semibold text-neutral-50">
-              Shop The Look
-            </h3>
-            <p className="text-xs text-neutral-400">
-              These items complete your outfit.
-            </p>
-
-            <div className="grid gap-3">
-              {shoppingItems.map((item, idx) => (
-                <ItemCard
-                  key={`${item.name}-${idx}-shopping`}
-                  item={item}
-                  type={item.type}
-                  isShopping
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Reset */}
+    <div className="min-h-[calc(100vh-4rem)] w-full max-w-6xl mx-auto px-4 py-6 sm:py-10">
+      {/* Top controls */}
+      <div className="flex items-center justify-between mb-6 gap-3">
         <button
-          type="button"
-          onClick={onReset}
-          className="mt-1 inline-flex items-center justify-center px-4 py-2.5 text-xs font-medium rounded-2xl border border-neutral-600 text-neutral-100 hover:bg-neutral-800 transition-colors"
+          onClick={onBack}
+          className="inline-flex items-center gap-2 text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white"
         >
-          Style Another Occasion
+          <span className="text-lg">←</span>
+          Back to styling
         </button>
+
+        <div className="text-right">
+          <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+            For
+          </div>
+          <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+            {recommendation.occasion || "Your occasion"}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-6 lg:gap-8 items-start">
+        {/* LEFT: Big image + tabs */}
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-md border border-neutral-200 dark:border-neutral-800 p-4 sm:p-6 flex flex-col">
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                Visual preview
+              </div>
+              <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+                {profile.name || "Your look"}
+              </div>
+            </div>
+
+            <div className="inline-flex text-xs rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-1 text-neutral-600 dark:text-neutral-300">
+              {profile.gender || "Gender?"} • {profile.skinTone || "Skin tone?"}
+            </div>
+          </div>
+
+          {/* Mode tabs */}
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              className={`flex-1 py-2 text-sm font-medium rounded-xl border transition-colors ${
+                viewMode === "2D"
+                  ? "bg-primary-600 text-white border-primary-600"
+                  : "bg-transparent text-neutral-600 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700"
+              }`}
+              onClick={() => setViewMode("2D")}
+            >
+              Fashion Sketch
+            </button>
+            <button
+              className={`flex-1 py-2 text-sm font-medium rounded-xl border transition-colors ${
+                viewMode === "REAL"
+                  ? "bg-primary-600 text-white border-primary-600"
+                  : "bg-transparent text-neutral-600 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700"
+              }`}
+              onClick={() => setViewMode("REAL")}
+              disabled={!recommendation}
+            >
+              Real Look
+            </button>
+          </div>
+
+          {/* Image container */}
+          <div className="flex-1 flex items-center justify-center rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-dashed border-neutral-200 dark:border-neutral-800 px-3 py-4 sm:px-6 sm:py-6">
+            {viewMode === "2D" && isGenerating2D && !generatedImage && (
+              <div className="text-center text-sm text-neutral-500 dark:text-neutral-400">
+                Generating fashion sketch…
+              </div>
+            )}
+
+            {viewMode === "REAL" && !hasReal && (
+              <button
+                onClick={onGenerateReal}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 shadow-sm"
+              >
+                Generate Real Look
+              </button>
+            )}
+
+            {activeImage && (
+              <img
+                src={activeImage}
+                alt={
+                  viewMode === "2D"
+                    ? "Fashion Sketch"
+                    : "Real Look"
+                }
+                className="w-full max-w-[520px] max-h-[520px] h-auto object-contain rounded-xl shadow-md"
+              />
+            )}
+
+            {!activeImage && !isGenerating2D && viewMode === "2D" && (
+              <div className="text-center text-sm text-neutral-500 dark:text-neutral-400">
+                Click “Generate Look” again if nothing appears.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: Outfit breakdown */}
+        <div className="space-y-4 sm:space-y-5">
+          {/* Overall vibe */}
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-4 sm:p-5 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-1">
+              Overall vibe
+            </div>
+            <div className="text-sm text-neutral-900 dark:text-neutral-50 mb-2">
+              {recommendation.overallVibe}
+            </div>
+            <div className="text-xs text-neutral-600 dark:text-neutral-300">
+              Confidence tip: {recommendation.confidenceTip}
+            </div>
+          </div>
+
+          {/* Outfit items */}
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+            <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Outfit breakdown
+            </div>
+
+            {(["top", "bottom", "shoes", "accessory"] as const).map((slot) => {
+              const item = (recommendation as any)[slot];
+              if (!item) return null;
+
+              return (
+                <div
+                  key={slot}
+                  className="flex items-start gap-3 text-sm border-b border-neutral-100 dark:border-neutral-800 last:border-b-0 pb-3 last:pb-0"
+                >
+                  <div className="w-20 text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400 shrink-0">
+                    {slot}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-neutral-900 dark:text-neutral-50">
+                        {item.color} {item.name}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400">
+                        {item.source === "Wardrobe"
+                          ? "From your wardrobe"
+                          : "Shopping suggestion"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-300 mt-0.5">
+                      {item.description}
+                    </div>
+                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
+                      Why: {item.reasoning}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Hair */}
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-4 sm:p-5 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-1">
+              Hair & finishing
+            </div>
+            <div className="text-sm text-neutral-900 dark:text-neutral-50">
+              {recommendation.hairstyle}
+            </div>
+            <div className="text-xs text-neutral-600 dark:text-neutral-300 mt-1">
+              {recommendation.hairstyleReasoning}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

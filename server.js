@@ -1,12 +1,15 @@
-// -------------------------
-// FULL SERVER.JS FOR CLOUD RUN
-// USER-PHOTO-BASED OUTFIT IMAGES
-// -------------------------
+// =====================================================================
+// FULL SERVER.JS — DIGITAL STYLIST AI
+// USER PHOTO → IMAGEN EDIT → SKETCH + REAL LOOK
+// GEMINI → PROFILE + WARDROBE + OUTFIT
+// STRICT OCCASION RULES (INTERVIEW, OFFICE, PARTY, WEDDING)
+// =====================================================================
 
 import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
+
 import {
   GoogleGenerativeAI,
   HarmCategory,
@@ -14,26 +17,25 @@ import {
   SchemaType
 } from "@google/generative-ai";
 
-// -------------------------------------------------------------------------
+// ------------------------------------------------------------
 // BASICS
-// -------------------------------------------------------------------------
+// ------------------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "30mb" }));
-
-// serve frontend
 app.use(express.static(path.join(__dirname, "dist")));
 
-// -------------------------------------------------------------------------
-// GEMINI TEXT CLIENT
-// -------------------------------------------------------------------------
+const PORT = process.env.PORT || 8080;
+
+// ------------------------------------------------------------
+// GEMINI (TEXT)
+// ------------------------------------------------------------
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_KEY) {
-  console.warn("WARNING: GEMINI_API_KEY is missing");
-}
+if (!GEMINI_KEY) console.warn("⚠ GEMINI_API_KEY missing");
+
 const genAI = new GoogleGenerativeAI(GEMINI_KEY || "");
 
 const safetySettings = [
@@ -43,35 +45,35 @@ const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
 ];
 
-const cleanJSON = (t) => t.replace(/```json\s*|\s*```/g, "").trim();
+const cleanJSON = (txt) => txt.replace(/```json|```/g, "").trim();
 
-// -------------------------------------------------------------------------
-// VERTEX IMAGEN CONFIG
-// -------------------------------------------------------------------------
+// ------------------------------------------------------------
+// IMAGEN EDIT CONFIG
+// ------------------------------------------------------------
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "digitalstylist";
 const IMAGEN_LOCATION = "us-central1";
+
+// This is the EDIT CAPABILITY MODEL — required for user-photo editing
 const IMAGEN_MODEL = "imagen-3.0-capability-001";
 
-// Get Cloud Run identity token
+// Fetch Cloud Run token
 async function getAccessToken() {
   const res = await fetch(
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-    {
-      headers: { "Metadata-Flavor": "Google" }
-    }
+    { headers: { "Metadata-Flavor": "Google" } }
   );
 
-  if (!res.ok) throw new Error("Failed to fetch metadata token");
+  if (!res.ok) throw new Error("Failed to fetch identity token");
+
   const json = await res.json();
   return json.access_token;
 }
 
-// -------------------------------------------------------------------------
-// API 1 — Profile Analysis (Gemini)
-// -------------------------------------------------------------------------
+// =======================================================================
+// 1) PROFILE ANALYSIS (GEMINI)
+// =======================================================================
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
-    if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY missing");
     const { base64Image, mimeType } = req.body;
 
     const model = genAI.getGenerativeModel({
@@ -97,10 +99,10 @@ app.post("/api/analyze-profile-image", async (req, res) => {
       ]
     };
 
-    const base64Content = base64Image.split(",")[1] || base64Image;
+    const content = base64Image.split(",")[1] || base64Image;
 
     const prompt = `
-Analyze this person's appearance ONLY.
+Analyze this person's physical appearance.
 Return JSON with:
 - gender
 - estimatedHeightCm
@@ -109,12 +111,12 @@ Return JSON with:
 - facialFeatures
 `;
 
-    const response = await model.generateContent({
+    const result = await model.generateContent({
       contents: [
         {
           role: "user",
           parts: [
-            { inlineData: { data: base64Content, mimeType } },
+            { inlineData: { data: content, mimeType } },
             { text: prompt }
           ]
         }
@@ -125,7 +127,7 @@ Return JSON with:
       }
     });
 
-    const parsed = JSON.parse(cleanJSON(response.response.text()));
+    const parsed = JSON.parse(cleanJSON(result.response.text()));
 
     res.json({
       gender: parsed.gender,
@@ -134,14 +136,14 @@ Return JSON with:
       skinTone: parsed.skinTone,
       facialFeatures: parsed.facialFeatures
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// -------------------------------------------------------------------------
-// API 2 — Wardrobe Analysis (Gemini)
-// -------------------------------------------------------------------------
+// =======================================================================
+// 2) WARDROBE ANALYSIS (GEMINI)
+// =======================================================================
 app.post("/api/analyze-wardrobe-image", async (req, res) => {
   try {
     const { base64Image, mimeType } = req.body;
@@ -164,11 +166,11 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
       }
     };
 
-    const base64Content = base64Image.split(",")[1] || base64Image;
+    const content = base64Image.split(",")[1] || base64Image;
 
     const prompt = `
-Identify clothing items. Return JSON array:
-[{ name, category, color }]
+Identify each clothing item.
+Return JSON: [{ name, category, color }]
 `;
 
     const result = await model.generateContent({
@@ -176,7 +178,7 @@ Identify clothing items. Return JSON array:
         {
           role: "user",
           parts: [
-            { inlineData: { data: base64Content, mimeType } },
+            { inlineData: { data: content, mimeType } },
             { text: prompt }
           ]
         }
@@ -190,19 +192,16 @@ Identify clothing items. Return JSON array:
     const items = JSON.parse(cleanJSON(result.response.text()));
 
     res.json(
-      items.map((x) => ({
-        id: Math.random().toString(36).substring(2),
-        ...x
-      }))
+      items.map((x) => ({ id: Math.random().toString(36).slice(2), ...x }))
     );
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// -------------------------------------------------------------------------
-// API 3 — Outfit Generation (Gemini)
-// -------------------------------------------------------------------------
+// =======================================================================
+// 3) OUTFIT GENERATION (GEMINI) — STRONG OCCASION RULES
+// =======================================================================
 app.post("/api/generate-outfit", async (req, res) => {
   try {
     const { profile, wardrobe, occasion } = req.body;
@@ -249,87 +248,109 @@ app.post("/api/generate-outfit", async (req, res) => {
       ]
     };
 
-    const wardrobeList = wardrobe
+    // Convert wardrobe array
+    const wardrobeList = (wardrobe || [])
       .map((w) => `- ${w.color} ${w.name} (${w.category})`)
       .join("\n");
+
+    const o = (occasion || "").toLowerCase();
+    let occasionRules = "General smart-casual outfit.";
+
+    if (o.includes("interview")) {
+      occasionRules = `
+INTERVIEW RULES:
+- NO shiny clothing
+- NO ethnic-wear sets (kurta pajama, sherwani, lehenga)
+- MUST be professional: shirts, blouses, blazers, trousers, pencil skirts
+- Colors: navy, black, grey, beige, white
+- Shoes: formal closed-toe
+`;
+    } else if (o.includes("office") || o.includes("work")) {
+      occasionRules = `
+OFFICE RULES:
+- Smart but comfortable
+- NO wedding-level shine or sequins
+- Simple kurtas OK only if minimal and elegant
+`;
+    } else if (o.includes("party") || o.includes("wedding") || o.includes("festive")) {
+      occasionRules = `
+FESTIVE RULES:
+- Ethnic wear allowed
+- Color, shine OK
+`;
+    }
 
     const prompt = `
 You are a professional stylist.
 
-PROFILE
+PROFILE:
 ${profile.gender}, ${profile.heightCm}cm, ${profile.weightKg}kg
 Skin tone: ${profile.skinTone}
 Face: ${profile.facialFeatures}
 
-OCCASION:
-"${occasion}"
+OCCASION: "${occasion}"
+${occasionRules}
 
-WARDROBE (use these first):
-${wardrobeList}
+WARDROBE:
+${wardrobeList || "(no wardrobe)"}
 
-RULES:
-1. Outfit MUST match the occasion
-2. Use wardrobe first
-3. Only use "Shopping" when needed
-4. Return ONLY JSON matching schema
+HARD RULES:
+1. Outfit MUST match occasion rules.
+2. Use wardrobe first, only use Shopping when necessary.
+3. NO non-occasion-appropriate items.
+4. RETURN ONLY JSON (exact schema).
 `;
 
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema
-      }
+      generationConfig: { responseMimeType: "application/json", responseSchema }
     });
 
     const parsed = JSON.parse(cleanJSON(result.response.text()));
     parsed.occasion = occasion;
 
     res.json(parsed);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// -------------------------------------------------------------------------
-// API 4 — FASHION SKETCH + REAL LOOK (Imagen Edit)
-// THIS USES USER’S PHOTO 100%
-// -------------------------------------------------------------------------
+// =======================================================================
+// 4) IMAGEN EDIT — USER PHOTO → SKETCH + REAL LOOK
+// =======================================================================
 app.post("/api/outfit-image", async (req, res) => {
   try {
     const { profile, recommendation, mode } = req.body;
 
-    if (!profile?.avatarImage) {
-      return res.status(400).json({ error: "profile.avatarImage missing" });
-    }
+    if (!profile?.avatarImage)
+      return res.status(400).json({ error: "Missing profile.avatarImage" });
 
-    const base64Avatar =
+    if (mode !== "sketch" && mode !== "real")
+      return res.status(400).json({ error: "Mode must be sketch or real" });
+
+    const avatarBase64 =
       profile.avatarImage.split(",")[1] || profile.avatarImage;
 
-    const outfitPrompt = `
-Edit this person so they are wearing:
+    const editPrompt = `
+Change ONLY the clothing on this person.
 
-TOP: ${recommendation.top?.color} ${recommendation.top?.name}
-BOTTOM: ${recommendation.bottom?.color} ${recommendation.bottom?.name}
-SHOES: ${recommendation.shoes?.color} ${recommendation.shoes?.name}
-ACCESSORY: ${recommendation.accessory?.name}
+OUTFIT:
+Top: ${recommendation.top.color} ${recommendation.top.name}
+Bottom: ${recommendation.bottom.color} ${recommendation.bottom.name}
+Shoes: ${recommendation.shoes.color} ${recommendation.shoes.name}
+Accessory: ${recommendation.accessory.name}
 
-Keep same:
-- face
-- body shape
-- pose
-- lighting
-- background
-
-Only change clothing.
-`.trim();
+RULES:
+- KEEP face, body, pose, lighting, background EXACTLY SAME.
+- Only change clothing.
+`;
 
     const stylePrompt =
       mode === "sketch"
-        ? "Render as a clean fashion illustration, white background, soft lines."
-        : "Render photorealistic, studio lighting.";
+        ? "Render as high-end fashion illustration, white background."
+        : "Render photorealistic, studio quality.";
 
-    const finalPrompt = `${outfitPrompt}\n\nStyle: ${stylePrompt}`;
+    const finalPrompt = `${editPrompt}\n\nStyle: ${stylePrompt}`;
 
     const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
 
@@ -343,15 +364,15 @@ Only change clothing.
             {
               referenceType: "REFERENCE_TYPE_RAW",
               referenceId: 1,
-              referenceImage: { bytesBase64Encoded: base64Avatar }
+              referenceImage: { bytesBase64Encoded: avatarBase64 }
             }
           ]
         }
       ],
       parameters: {
         sampleCount: 1,
-        outputOptions: { mimeType: "image/png" },
-        personGeneration: "allow_adult"
+        personGeneration: "allow_adult",
+        outputOptions: { mimeType: "image/png" }
       }
     };
 
@@ -366,30 +387,28 @@ Only change clothing.
 
     const json = await resp.json();
 
-    if (!resp.ok) {
-      return res.status(500).json({ error: json });
-    }
+    if (!resp.ok) return res.status(500).json({ error: json });
 
     const pred = json.predictions?.[0];
-    if (!pred?.bytesBase64Encoded) {
+    if (!pred?.bytesBase64Encoded)
       return res.status(500).json({ error: "No image returned" });
-    }
 
     res.json({
       imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}`
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// -------------------------------------------------------------------------
-// SPA fallback
-// -------------------------------------------------------------------------
+// =======================================================================
+// FRONTEND FALLBACK
+// =======================================================================
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
-// start
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log("Server running on", PORT));
+// =======================================================================
+// START SERVER
+// =======================================================================
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

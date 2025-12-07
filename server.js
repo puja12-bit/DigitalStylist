@@ -88,7 +88,10 @@ async function getAccessToken() {
 // =======================================================================
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
+    console.log("DEBUG analyze-profile-image body:", Object.keys(req.body));
+
     const { base64Image, mimeType } = req.body;
+
     if (!base64Image || !mimeType) {
       return res
         .status(400)

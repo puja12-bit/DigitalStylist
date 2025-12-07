@@ -99,43 +99,46 @@ export const generateOutfit = async (
 // The backend expects "FASHION_SKETCH" or "REAL_LOOK".
 // This function maps between them.
 //
+
 export const generateOutfitImage = async (
-  mode: "sketch" | "real",
+  recommendation: OutfitRecommendation,
   profile: UserProfile,
-  outfit: OutfitRecommendation
+  style: '2D' | 'REAL' = '2D'
 ): Promise<string | null> => {
+  
+  // Create a detailed description of the user so the "Real" image looks like them
+  const prompt = `
+    Subject: Full body fashion shot of a ${profile.gender} model.
+    Physical Details: ${profile.skinTone} skin tone, ${profile.estimatedHeightCm}cm height, ${profile.estimatedWeightKg}kg weight body type.
+    Facial Features: ${profile.facialFeatures}.
+    
+    Wearing Outfit:
+    - Top: ${recommendation.top.color} ${recommendation.top.name}
+    - Bottom: ${recommendation.bottom.color} ${recommendation.bottom.name}
+    - Shoes: ${recommendation.shoes.color} ${recommendation.shoes.name}
+    
+    Pose: Standing confidently looking at camera.
+  `;
+
   try {
-    const res = await fetch("/api/outfit-image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ mode, profile, outfit }),
+    // Send request to our own server (which handles the Credits & Vertex AI)
+    const response = await fetch('/api/generate-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, style })
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("Outfit image API failed", res.status, text);
+    const data = await response.json();
+
+    if (data.success && data.image) {
+      return data.image; // Returns the high-quality image
+    } else {
+      console.error("Image Generation Failed:", data.error);
       return null;
     }
 
-    const json = (await res.json()) as { imageDataUrl?: string };
-    return json.imageDataUrl || null;
-  } catch (err) {
-    console.error("generateOutfitImage error", err);
+  } catch (error) {
+    console.error("Network Error:", error);
     return null;
-  }
-};
-
-    if (!data.imageDataUrl) {
-      throw new Error("Server did not return an image.");
-    }
-
-    return data.imageDataUrl;
-  } catch (err: any) {
-    console.error("generateOutfitImage error:", err);
-    throw new Error(
-      err?.message || "Failed to generate outfit image on server."
-    );
   }
 };

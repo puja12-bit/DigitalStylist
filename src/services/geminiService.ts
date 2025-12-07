@@ -4,6 +4,7 @@ import {
   OutfitRecommendation
 } from "../types";
 
+// Generic helper to call our backend
 const postJson = async <T>(url: string, body: any): Promise<T> => {
   const res = await fetch(url, {
     method: "POST",
@@ -13,14 +14,18 @@ const postJson = async <T>(url: string, body: any): Promise<T> => {
     body: JSON.stringify(body)
   });
 
+  const text = await res.text();
   if (!res.ok) {
-    const text = await res.text();
     throw new Error(
       `Request to ${url} failed (${res.status}): ${text || "Unknown error"}`
     );
   }
 
-  return res.json() as Promise<T>;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Invalid JSON from ${url}: ${text}`);
+  }
 };
 
 // -------------------------------------------------------
@@ -86,28 +91,41 @@ export const generateOutfit = async (
 };
 
 // -------------------------------------------------------
-// 4) Generate outfit image (fashion sketch / real look)
+// 4) Generate outfit image (Fashion Sketch / Real Look)
 // -------------------------------------------------------
+//
+// IMPORTANT:
+// Your existing UI uses "2D" for Fashion Sketch and "REAL" for Real Look.
+// The backend expects "FASHION_SKETCH" or "REAL_LOOK".
+// This function maps between them.
+//
 export const generateOutfitImage = async (
   recommendation: OutfitRecommendation,
   profile: UserProfile,
-  mode: "FASHION_SKETCH" | "REAL_LOOK"
+  mode: "2D" | "REAL"
 ): Promise<string | null> => {
   try {
     if (!profile.avatarImage) {
       throw new Error("No profile image available for visualization.");
     }
 
+    const backendMode =
+      mode === "2D" ? "FASHION_SKETCH" : "REAL_LOOK";
+
     const data = await postJson<{ imageDataUrl: string }>(
       "/api/outfit-image",
       {
         recommendation,
         profile,
-        mode
+        mode: backendMode
       }
     );
 
-    return data.imageDataUrl || null;
+    if (!data.imageDataUrl) {
+      throw new Error("Server did not return an image.");
+    }
+
+    return data.imageDataUrl;
   } catch (err: any) {
     console.error("generateOutfitImage error:", err);
     throw new Error(

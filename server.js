@@ -119,7 +119,7 @@ app.post("/api/analyze-profile-image", async (req, res) => {
     const content = base64Image.split(",")[1] || base64Image;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-pro",
+      model: "gemini-1.5-flash",
       safetySettings,
     });
 

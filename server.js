@@ -178,21 +178,14 @@ Return JSON with:
       skinTone: parsed.skinTone,
       facialFeatures: parsed.facialFeatures,
     });
-  } catch (e) {
-    console.error("analyze-profile-image hard error:", e);
-
-    // DO NOT KILL THE FLOW. Return safe fallback so UI continues.
-    return res.status(200).json({
-      gender: "uncertain",
-      heightCm: 170,
-      weightKg: 65,
-      skinTone: "Medium",
-      facialFeatures:
-        "Auto-analysis failed. Please adjust gender, height, weight and facial details manually.",
-      _warning: e?.message || "Profile analysis failed; fallback values used.",
-    });
+   } catch (e) {
+    console.error("analyze-profile-image error:", e);
+    return res
+      .status(500)
+      .json({ error: e?.message || "Profile analysis failed" });
   }
 });
+
 
 // =======================================================================
 // 2) WARDROBE ANALYSIS (GEMINI 2.0 FLASH)

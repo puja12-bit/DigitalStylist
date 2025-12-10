@@ -10,10 +10,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^1.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
+  "@google/generative-ai": "^0.21.0",
+  "react": "^18.2.0",
+  "react-dom": "^18.2.0"
+},
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",

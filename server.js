@@ -1,4 +1,4 @@
-// server.js - REST Gemini v1 handlers (replace diagnostic file)
+// server.js - REST Gemini v1 backend + optional Imagen support
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -9,23 +9,23 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "30mb" }));
+app.use(express.json({ limit: "40mb" }));
 app.use(express.static(path.join(__dirname, "dist")));
 
 const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"; // change if needed
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"; // valid v1 model
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "";
+const IMAGEN_LOCATION = process.env.IMAGEN_LOCATION || "us-central1";
+const IMAGEN_MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-capability-001";
 
-console.log("🚀 Server starting...");
-console.log("PORT =", PORT);
-console.log("NODE_ENV =", process.env.NODE_ENV);
-console.log("GEMINI_API_KEY present =", !!GEMINI_API_KEY);
-console.log("GEMINI_MODEL =", GEMINI_MODEL);
+console.log("Server starting...");
+console.log("PORT=", PORT, "GEMINI_MODEL=", GEMINI_MODEL, "GEMINI_KEY_PRESENT=", !!GEMINI_API_KEY);
 
-// --------- Helper: call Gemini v1 REST and return raw parsed text/JSON ----------
+// ----------------- Helper: call Gemini v1 REST -----------------
 async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationConfig = {} }) {
   if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not set on server");
+    throw new Error("GEMINI_API_KEY missing on server");
   }
 
   const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(
@@ -35,13 +35,11 @@ async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationC
   const body = {
     contents,
     generationConfig: {
-      // allowed REST fields
-      temperature: generationConfig.temperature ?? 0.4,
+      temperature: generationConfig.temperature ?? 0.3,
       topK: generationConfig.topK ?? 40,
       topP: generationConfig.topP ?? 0.95,
       maxOutputTokens: generationConfig.maxOutputTokens ?? 512,
     },
-    // minimal safetySettings as strings (the REST accepts these simple values)
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -59,43 +57,48 @@ async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationC
   const json = await resp.json();
 
   if (!resp.ok) {
-    // include full JSON for debugging
     const msg = `[Gemini REST ${resp.status}] ${JSON.stringify(json)}`;
-    const err = new Error(msg);
-    err.meta = json;
-    throw err;
+    const e = new Error(msg);
+    e.meta = json;
+    throw e;
   }
 
-  // Compose text from candidates -> content -> parts[].text
   const candidate = json?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
   const text = parts.map((p) => p.text || "").join(" ").trim();
 
-  if (!text) {
-    throw new Error("Empty text response from Gemini");
-  }
+  if (!text) throw new Error("Empty text response from Gemini");
 
   return { text, raw: json };
 }
 
-// --------- ROUTES ----------
+// ----------------- Helper: get access token for Imagen -----------------
+async function getAccessToken() {
+  const resp = await fetch(
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+    {
+      headers: { "Metadata-Flavor": "Google" },
+    }
+  );
+  if (!resp.ok) throw new Error("Failed to fetch GCP metadata token");
+  const j = await resp.json();
+  return j.access_token;
+}
 
-// health and static SPA fallback
+// ----------------- Routes -----------------
+
 app.get("/health", (_req, res) => res.status(200).send("OK"));
-app.get("/", (_req, res) => res.send("Server running"));
 
-// Analyze profile image -> returns { gender, heightCm, weightKg, skinTone, facialFeatures }
+// ---- PROFILE ANALYSIS ----
 app.post("/api/analyze-profile-image", async (req, res) => {
   try {
     const { base64Image, mimeType } = req.body || {};
-    if (!base64Image || !mimeType) {
-      return res.status(400).json({ error: "base64Image and mimeType are required" });
-    }
+    if (!base64Image || !mimeType) return res.status(400).json({ error: "base64Image and mimeType required" });
 
     const contentData = base64Image.split(",")[1] || base64Image;
 
-    const userPrompt = `
-Analyze the provided photo for a fashion app. Return ONLY JSON with these fields:
+    const prompt = `
+Analyze the provided photo for a fashion styling application. Return EXACTLY a JSON object with:
 {
   "gender": "Male|Female|Non-binary|uncertain",
   "heightCm": 170,
@@ -103,7 +106,7 @@ Analyze the provided photo for a fashion app. Return ONLY JSON with these fields
   "skinTone": "Fair|Light|Medium|Olive|Tan|Dark|Deep",
   "facialFeatures": "One or two short sentences describing face shape, brows, nose, lips, eyes, hairstyle."
 }
-Keep facialFeatures concise (1-2 sentences). Do not add any extra text or commentary.
+Keep facialFeatures 1-2 short sentences. Return only JSON.
 `;
 
     const contents = [
@@ -111,45 +114,98 @@ Keep facialFeatures concise (1-2 sentences). Do not add any extra text or commen
         role: "user",
         parts: [
           { inline_data: { mime_type: mimeType, data: contentData } },
-          { text: userPrompt },
+          { text: prompt },
         ],
       },
     ];
 
     const { text } = await callGeminiREST({
-      model: GEMINI_MODEL,
       contents,
       generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
     });
 
-    // remove code fences and parse JSON
     const cleaned = text.replace(/```json|```/g, "").trim();
-
     let parsed;
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      // if parsing fails, return raw text for debugging
-      return res.status(500).json({ error: "Failed to parse Gemini JSON response", responseText: cleaned });
+      return res.status(500).json({ error: "Failed to parse Gemini JSON", responseText: cleaned });
     }
 
-    // Normalize keys to your frontend shape if needed
-    const respObj = {
-      gender: parsed.gender ?? parsed.gender?.toLowerCase() ?? "uncertain",
-      heightCm: parsed.heightCm ?? parsed.estimatedHeightCm ?? parsed.estimatedHeight ?? null,
-      weightKg: parsed.weightKg ?? parsed.estimatedWeightKg ?? parsed.estimatedWeight ?? null,
-      skinTone: parsed.skinTone ?? parsed.skin_tone ?? parsed.skin ?? null,
-      facialFeatures: parsed.facialFeatures ?? parsed.facial_features ?? parsed.facial_description ?? "",
+    const out = {
+      gender: parsed.gender ?? "uncertain",
+      heightCm: parsed.heightCm ?? parsed.estimatedHeightCm ?? null,
+      weightKg: parsed.weightKg ?? parsed.estimatedWeightKg ?? null,
+      skinTone: parsed.skinTone ?? parsed.skin_tone ?? null,
+      facialFeatures: parsed.facialFeatures ?? parsed.facial_features ?? "",
     };
 
-    return res.json(respObj);
+    return res.json(out);
   } catch (err) {
     console.error("analyze-profile-image error:", err);
     return res.status(500).json({ error: err.message || "Profile analysis failed", detail: err.meta ?? null });
   }
 });
 
-// Generate outfit -> returns the JSON outfit object as described in prompts
+// ---- WARDROBE ANALYSIS ----
+app.post("/api/analyze-wardrobe-image", async (req, res) => {
+  try {
+    const { base64Image, mimeType } = req.body || {};
+    if (!base64Image || !mimeType) return res.status(400).json({ error: "base64Image and mimeType required" });
+
+    const contentData = base64Image.split(",")[1] || base64Image;
+
+    const prompt = `
+You are a fashion AI that lists clothing items in an image.
+Return ONLY a JSON array where each item has:
+{ "name":"short name", "category":"Top|Bottom|Dress|Shoes|Accessory|Outerwear|Other", "color":"primary color" }
+Example:
+[
+  { "name":"white cotton shirt", "category":"Top", "color":"white" },
+  { "name":"dark jeans", "category":"Bottom", "color":"dark blue" }
+]
+Do not add any extra text.
+`;
+
+    const contents = [
+      {
+        role: "user",
+        parts: [
+          { inline_data: { mime_type: mimeType, data: contentData } },
+          { text: prompt },
+        ],
+      },
+    ];
+
+    const { text } = await callGeminiREST({
+      contents,
+      generationConfig: { temperature: 0.1, maxOutputTokens: 400 },
+    });
+
+    const cleaned = text.replace(/```json|```/g, "").trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+      if (!Array.isArray(parsed)) throw new Error("Gemini did not return an array");
+    } catch (e) {
+      return res.status(500).json({ error: "Failed to parse wardrobe JSON", responseText: cleaned });
+    }
+
+    const items = parsed.map((it) => ({
+      id: Math.random().toString(36).substr(2, 9),
+      name: it.name || it.item || "Unknown item",
+      category: it.category || "Other",
+      color: it.color || it.colour || "Unknown",
+    }));
+
+    return res.json(items);
+  } catch (err) {
+    console.error("analyze-wardrobe-image error:", err);
+    return res.status(500).json({ error: err.message || "Wardrobe analysis failed", detail: err.meta ?? null });
+  }
+});
+
+// ---- OUTFIT GENERATION ----
 app.post("/api/generate-outfit", async (req, res) => {
   try {
     const { profile = {}, wardrobe = [], occasion = "" } = req.body || {};
@@ -163,14 +219,14 @@ app.post("/api/generate-outfit", async (req, res) => {
 OCCASION CATEGORY: JOB INTERVIEW
 RULES:
 - MUST look professional and reliable.
-- FORBIDDEN: shiny fabrics, sequin, heavy festive/wedding outfits (kurta pajama, lehenga, sherwani).
-- ALLOWED: shirts, blazers, trousers, pencil skirts, modest dresses, chinos.
+- FORBIDDEN: shiny fabrics, heavy festive/wedding outfits (kurta pajama, lehenga, sherwani).
+- ALLOWED: shirts, blazers, trousers, skirts, modest dresses, chinos.
 - COLORS: navy, black, grey, beige, white, muted tones.
 `;
     }
 
     const prompt = `
-You are a professional fashion stylist. Based on the USER PROFILE and WARDROBE below, produce a single outfit that fits the occasion.
+You are a professional stylist.
 
 USER PROFILE:
 - Gender: ${profile.gender || "unknown"}
@@ -193,24 +249,19 @@ Return ONLY JSON in this exact shape:
   "accessory": { "name":"", "description":"", "color":"", "source":"Wardrobe"|"Shopping", "reasoning":"" },
   "hairstyle":"", "hairstyleReasoning":"", "confidenceTip":"", "overallVibe":""
 }
-Do not include any commentary or markdown. Keep strings concise but specific.
+Do not include any commentary or markdown.
 `;
 
     const contents = [{ role: "user", parts: [{ text: prompt }] }];
 
-    const { text } = await callGeminiREST({
-      model: GEMINI_MODEL,
-      contents,
-      generationConfig: { temperature: 0.25, maxOutputTokens: 700 },
-    });
+    const { text } = await callGeminiREST({ contents, generationConfig: { temperature: 0.25, maxOutputTokens: 700 } });
 
     const cleaned = text.replace(/```json|```/g, "").trim();
-
     let parsed;
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      return res.status(500).json({ error: "Failed to parse outfit JSON from Gemini", responseText: cleaned });
+      return res.status(500).json({ error: "Failed to parse outfit JSON", responseText: cleaned });
     }
 
     return res.json(parsed);
@@ -220,12 +271,88 @@ Do not include any commentary or markdown. Keep strings concise but specific.
   }
 });
 
+// ---- OUTFIT IMAGE (IMAGEN) - optional, may require enabling Vertex APIs ----
+app.post("/api/outfit-image", async (req, res) => {
+  try {
+    const { profile = {}, recommendation = {}, mode = "sketch" } = req.body || {};
+    if (!profile.avatarImage) return res.status(400).json({ error: "profile.avatarImage required" });
+
+    const avatarBase64 = profile.avatarImage.split(",")[1] || profile.avatarImage;
+
+    const top = recommendation.top || {};
+    const bottom = recommendation.bottom || {};
+    const shoes = recommendation.shoes || {};
+    const accessory = recommendation.accessory || {};
+
+    const editPrompt = `
+Modify only the clothing on this person according to the outfit below.
+Keep face, pose, background, lighting, and identity unchanged.
+OUTFIT:
+Top: ${top.color || ""} ${top.name || ""}. ${top.description || ""}
+Bottom: ${bottom.color || ""} ${bottom.name || ""}. ${bottom.description || ""}
+Shoes: ${shoes.color || ""} ${shoes.name || ""}. ${shoes.description || ""}
+Accessory: ${accessory.name || ""} ${accessory.description || ""}
+STYLE: ${mode === "sketch" ? "High-end fashion illustration, clean lines." : "Photorealistic studio-quality photo."}
+Return image bytes only in the prediction response.
+`;
+
+    // call Vertex Imagen predict
+    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID/GOOGLE_CLOUD_PROJECT not set for Imagen" });
+
+    const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
+    const token = await getAccessToken();
+
+    const body = {
+      instances: [
+        {
+          prompt: editPrompt,
+          referenceImages: [
+            {
+              referenceType: "REFERENCE_TYPE_RAW",
+              referenceId: 1,
+              referenceImage: { bytesBase64Encoded: avatarBase64 },
+            },
+          ],
+        },
+      ],
+      parameters: {
+        sampleCount: 1,
+        personGeneration: "allow_adult",
+        outputOptions: { mimeType: "image/png" },
+      },
+    };
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const json = await resp.json();
+    if (!resp.ok) {
+      console.error("Imagen predict failed", resp.status, json);
+      return res.status(500).json({ error: "Imagen predict failed", detail: json });
+    }
+
+    const pred = json.predictions?.[0];
+    if (!pred?.bytesBase64Encoded) return res.status(500).json({ error: "No image returned from Imagen", detail: json });
+
+    return res.json({ imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}` });
+  } catch (err) {
+    console.error("outfit-image error:", err);
+    return res.status(500).json({ error: err.message || "Outfit image failed", detail: err.meta ?? null });
+  }
+});
+
 // SPA fallback
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
-// start server
+// Start server
 app.listen(PORT, () => {
-  console.log(`✅ Server listening on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });

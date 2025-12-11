@@ -6,7 +6,8 @@ import {
 
 type Props = {
   profile: UserProfile;
-  recommendation: OutfitRecommendation;
+  recommendation?: OutfitRecommendation | null;   // <- made optional
+  occasion?: string;                             // <- optional occasion prop
   generatedImage: string | null;
   generatedImageReal: string | null;
   isGenerating2D: boolean;
@@ -17,6 +18,7 @@ type Props = {
 const ResultDisplay: React.FC<Props> = ({
   profile,
   recommendation,
+  occasion,
   generatedImage,
   generatedImageReal,
   isGenerating2D,
@@ -24,6 +26,45 @@ const ResultDisplay: React.FC<Props> = ({
   onBack,
 }) => {
   const [viewMode, setViewMode] = React.useState<"2D" | "REAL">("2D");
+
+  // Defensive: if no recommendation yet, show a safe placeholder
+  if (!recommendation) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] w-full max-w-6xl mx-auto px-4 py-6 sm:py-10">
+        <div className="mb-6 flex items-center justify-between">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white"
+          >
+            <span className="text-lg">←</span>
+            Back to styling
+          </button>
+
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              For
+            </div>
+            <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+              {occasion || "Your occasion"}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-md border border-neutral-200 dark:border-neutral-800 p-6">
+          <div className="text-center py-20 text-neutral-500 dark:text-neutral-400">
+            <div className="text-lg font-medium mb-2">No recommendation yet</div>
+            <div className="mb-4">Please click “Get My Look” or wait for the recommendation to appear.</div>
+            <button
+              onClick={onBack}
+              className="px-4 py-2 rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700"
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const activeImage =
     viewMode === "2D" ? generatedImage : generatedImageReal;
@@ -47,7 +88,7 @@ const ResultDisplay: React.FC<Props> = ({
             For
           </div>
           <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-            {recommendation.occasion || "Your occasion"}
+            {occasion || recommendation.occasion || "Your occasion"}
           </div>
         </div>
       </div>
@@ -61,12 +102,12 @@ const ResultDisplay: React.FC<Props> = ({
                 Visual preview
               </div>
               <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-                {profile.name || "Your look"}
+                {profile?.name || "Your look"}
               </div>
             </div>
 
             <div className="inline-flex text-xs rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-1 text-neutral-600 dark:text-neutral-300">
-              {profile.gender || "Gender?"} • {profile.skinTone || "Skin tone?"}
+              {profile?.gender || "Gender?"} • {profile?.skinTone || "Skin tone?"}
             </div>
           </div>
 

@@ -267,48 +267,45 @@ Do not include any commentary or markdown.
 app.post("/api/outfit-image", async (req, res) => {
   try {
     const { profile = {}, recommendation = {}, mode = "sketch" } = req.body || {};
-    // profile.avatarImage should be data URL: data:image/png;base64,...
+    
+    // Validate Input
     if (!profile.avatarImage) return res.status(400).json({ error: "profile.avatarImage required" });
-
-    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID/GOOGLE_CLOUD_PROJECT not set for Imagen" });
+    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID not set for Imagen" });
 
     const avatarBase64 = profile.avatarImage.split(",")[1] || profile.avatarImage;
 
-    // Build prompt differently for sketch vs real
+    // Build parts from recommendation
     const top = recommendation.top || {};
     const bottom = recommendation.bottom || {};
     const shoes = recommendation.shoes || {};
     const accessory = recommendation.accessory || {};
 
-    // Sketch style: fashion illustration / pencil / clean lines, model standing front.
+    // 1. Define Prompts
+    // SKETCH PROMPT: Forces flat 2D illustration
     const sketchPrompt = `
-Create a clean fashion sketch illustration of the PERSON in the provided reference image.
-- Keep the person's face, pose and body proportions identical to the reference.
-- Replace clothing according to the outfit below.
-- Use clean line art and flat colors, minimal shading, high-fashion illustration style (pencil/ink + subtle watercolor).
-- Make the figure centered on a plain white background, full body view from head to toe, no extraneous objects.
-OUTFIT:
-Top: ${top.color || ""} ${top.name || ""}. ${top.description || ""}
-Bottom: ${bottom.color || ""} ${bottom.name || ""}. ${bottom.description || ""}
-Shoes: ${shoes.color || ""} ${shoes.name || ""}. ${shoes.description || ""}
-Accessory: ${accessory.name || ""} ${accessory.description || ""}
-Return only the edited image bytes in the response.
-`;
+      fashion illustration sketch of a person standing, 
+      wearing ${top.color} ${top.name}, ${bottom.color} ${bottom.name}, ${shoes.color} ${shoes.name}.
+      The person has ${profile.facialFeatures || "neutral expression"}.
+      style: clean vector art, fashion croquis, pencil sketch, flat coloring, white background.
+      high quality, masterpiece, full body view.
+    `;
 
-    // Real style: photorealistic studio edit
+    // REAL PROMPT: Forces photorealism
     const realPrompt = `
-Modify only the clothing on this person according to the outfit below.
-Keep face, pose, background, lighting, and identity unchanged.
-OUTFIT:
-Top: ${top.color || ""} ${top.name || ""}. ${top.description || ""}
-Bottom: ${bottom.color || ""} ${bottom.name || ""}. ${bottom.description || ""}
-Shoes: ${shoes.color || ""} ${shoes.name || ""}. ${shoes.description || ""}
-Accessory: ${accessory.name || ""} ${accessory.description || ""}
-STYLE: Photorealistic studio-quality photo, natural lighting, accurate fabric textures.
-Return image bytes only in the prediction response.
-`;
+      raw studio photo of a person standing,
+      wearing ${top.color} ${top.name}, ${bottom.color} ${bottom.name}, ${shoes.color} ${shoes.name}.
+      The person has ${profile.facialFeatures || "neutral expression"}.
+      lighting: cinematic lighting, soft studio lights, 8k resolution, photorealistic, full body view.
+    `;
+
+    // 2. Define Negative Prompts (The Secret Sauce to fix your issues)
+    // If we want a Sketch, we forbid "photorealism"
+    const negSketch = "photorealistic, photograph, 3d render, camera, glossy, shadow, texture, noise, blurry, messy, watermark, text, extra limbs, distorted body, split body";
+    // If we want Real, we forbid "drawings"
+    const negReal = "drawing, sketch, cartoon, anime, painting, illustration, vector, 2d, black and white, blurry, low quality, extra limbs, distorted body, split body";
 
     const promptToUse = mode === "real" ? realPrompt : sketchPrompt;
+    const negativeToUse = mode === "real" ? negReal : negSketch;
 
     const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
     const token = await getAccessToken();
@@ -328,9 +325,11 @@ Return image bytes only in the prediction response.
       ],
       parameters: {
         sampleCount: 1,
+        // CRITICAL FIX: "3:4" matches your Frontend aspect-[3/4] perfectly.
+        // This prevents the AI from squeezing the body (extra legs) or cropping the head.
+        aspectRatio: "3:4", 
+        negativePrompt: negativeToUse,
         personGeneration: "allow_adult",
-        // For sketch we don't need ultra-large size; 1024 is fine and faster.
-        // Imagen server will choose output; ask for png
         outputOptions: { mimeType: "image/png" },
       },
     };

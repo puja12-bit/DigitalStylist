@@ -1,4 +1,4 @@
-// server.js - REST Gemini v1 backend + Imagen (sketch + real) support
+// server.js - REST Gemini v1 backend + Imagen (sketch + real) improved prompts
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -9,12 +9,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "40mb" }));
+app.use(express.json({ limit: "60mb" }));
 app.use(express.static(path.join(__dirname, "dist")));
 
 const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"; // ensure valid
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "";
 const IMAGEN_LOCATION = process.env.IMAGEN_LOCATION || "us-central1";
 const IMAGEN_MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-capability-001";
@@ -118,7 +118,7 @@ Keep facialFeatures 1-2 short sentences. Return only JSON.
 
     const { text } = await callGeminiREST({
       contents,
-      generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
+      generationConfig: { temperature: 0.05, maxOutputTokens: 300 },
     });
 
     const cleaned = text.replace(/```json|```/g, "").trim();
@@ -171,7 +171,7 @@ Do not add any extra text.
 
     const { text } = await callGeminiREST({
       contents,
-      generationConfig: { temperature: 0.1, maxOutputTokens: 400 },
+      generationConfig: { temperature: 0.05, maxOutputTokens: 400 },
     });
 
     const cleaned = text.replace(/```json|```/g, "").trim();
@@ -246,7 +246,7 @@ Do not include any commentary or markdown.
 
     const contents = [{ role: "user", parts: [{ text: prompt }] }];
 
-    const { text } = await callGeminiREST({ contents, generationConfig: { temperature: 0.25, maxOutputTokens: 700 } });
+    const { text } = await callGeminiREST({ contents, generationConfig: { temperature: 0.15, maxOutputTokens: 700 } });
 
     const cleaned = text.replace(/```json|```/g, "").trim();
     let parsed;
@@ -263,50 +263,51 @@ Do not include any commentary or markdown.
   }
 });
 
-// ---- OUTFIT IMAGE (IMAGEN) - supports 'sketch' and 'real' ----
+// ---- OUTFIT IMAGE (IMAGEN) - improved prompts for pose/identity/sketch control ----
 app.post("/api/outfit-image", async (req, res) => {
   try {
     const { profile = {}, recommendation = {}, mode = "sketch" } = req.body || {};
-    
-    // Validate Input
+
     if (!profile.avatarImage) return res.status(400).json({ error: "profile.avatarImage required" });
     if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID not set for Imagen" });
 
     const avatarBase64 = profile.avatarImage.split(",")[1] || profile.avatarImage;
 
-    // Build parts from recommendation
     const top = recommendation.top || {};
     const bottom = recommendation.bottom || {};
     const shoes = recommendation.shoes || {};
     const accessory = recommendation.accessory || {};
 
-    // 1. Define Prompts
-    // SKETCH PROMPT: Forces flat 2D illustration
+    // ---------------- PROMPT STRATEGY ----------------
+    // We explicitly instruct: (A) keep face identity, (B) render subject in a neutral FRONTAL standing pose,
+    // (C) only change clothing, (D) avoid copying the original pose, (E) avoid extra limbs & artifacts.
+    //
+    // The negativePrompt blocks unwanted styles and artifacts (extra limbs, photoreal vs sketch mixups).
     const sketchPrompt = `
-      fashion illustration sketch of a person standing, 
-      wearing ${top.color} ${top.name}, ${bottom.color} ${bottom.name}, ${shoes.color} ${shoes.name}.
-      The person has ${profile.facialFeatures || "neutral expression"}.
-      style: clean vector art, fashion croquis, pencil sketch, flat coloring, white background.
-      high quality, masterpiece, full body view.
-    `;
+Fashion croquis / pencil sketch: Produce a clean 2D fashion illustration (pencil lines + minimal flat color)
+of the PERSON in the reference image. DO NOT change the person's face or identity. DO NOT copy the original pose —
+instead render the person in a neutral, frontal standing pose (facing the camera) with natural proportions.
+Apply the outfit: Top: ${top.color || ""} ${top.name || ""}. Bottom: ${bottom.color || ""} ${bottom.name || ""}. Shoes: ${shoes.color || ""} ${shoes.name || ""}. Accessory: ${accessory.name || ""}.
+Style: fashion croquis, pencil strokes, clean lines, minimal shading, white background. Full body, 3:4 aspect ratio.
+Return the edited image only.
+`;
 
-    // REAL PROMPT: Forces photorealism
     const realPrompt = `
-      raw studio photo of a person standing,
-      wearing ${top.color} ${top.name}, ${bottom.color} ${bottom.name}, ${shoes.color} ${shoes.name}.
-      The person has ${profile.facialFeatures || "neutral expression"}.
-      lighting: cinematic lighting, soft studio lights, 8k resolution, photorealistic, full body view.
-    `;
+Studio photorealistic full-body image: Produce a high-quality photorealistic studio photo of the PERSON wearing the outfit:
+Top: ${top.color || ""} ${top.name || ""}. Bottom: ${bottom.color || ""} ${bottom.name || ""}. Shoes: ${shoes.color || ""} ${shoes.name || ""}. Accessory: ${accessory.name || ""}.
+DO NOT alter the person's face or identity. DO NOT replicate the original pose; instead render a neutral frontal standing pose (facing camera), arms relaxed by the side or natural slight angle.
+Lighting: soft studio lighting, natural skin tones, high detail, 4k equivalent. Background: clean neutral background. Full body, 3:4 aspect ratio.
+Return the edited image only.
+`;
 
-    // 2. Define Negative Prompts (The Secret Sauce to fix your issues)
-    // If we want a Sketch, we forbid "photorealism"
-    const negSketch = "photorealistic, photograph, 3d render, camera, glossy, shadow, texture, noise, blurry, messy, watermark, text, extra limbs, distorted body, split body";
-    // If we want Real, we forbid "drawings"
-    const negReal = "drawing, sketch, cartoon, anime, painting, illustration, vector, 2d, black and white, blurry, low quality, extra limbs, distorted body, split body";
+    // Negative prompts to reduce artifacts
+    const negSketch = "photorealistic, photograph, 3d render, camera, glossy, heavy texture, jewelry reflections, watermark, text, extra limbs, extra arms, multiple faces, deformed, distorted body, low quality, blurry";
+    const negReal = "drawing, sketch, cartoon, anime, painting, illustration, vector, watermark, text, extra limbs, deformed, distorted body, cartoonish";
 
     const promptToUse = mode === "real" ? realPrompt : sketchPrompt;
     const negativeToUse = mode === "real" ? negReal : negSketch;
 
+    // --------------- Imagen request ---------------
     const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
     const token = await getAccessToken();
 
@@ -325,12 +326,14 @@ app.post("/api/outfit-image", async (req, res) => {
       ],
       parameters: {
         sampleCount: 1,
-        // CRITICAL FIX: "3:4" matches your Frontend aspect-[3/4] perfectly.
-        // This prevents the AI from squeezing the body (extra legs) or cropping the head.
-        aspectRatio: "3:4", 
-        negativePrompt: negativeToUse,
         personGeneration: "allow_adult",
+        // aspectRatio and output mime
+        aspectRatio: "3:4",
+        negativePrompt: negativeToUse,
+        // Ensure returned image is a standalone image, png
         outputOptions: { mimeType: "image/png" },
+        // Additional safety: reduce hallucination of props/body parts
+        safetySettings: { removeText: true },
       },
     };
 

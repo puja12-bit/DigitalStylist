@@ -282,93 +282,90 @@ Do not include any commentary or markdown.
   }
 });
 
-// ---- OUTFIT IMAGE (IMAGEN) - improved prompts & negative prompts ----
-app.post("/api/outfit-image", async (req, res) => {
+// ---- OUTFIT GENERATION ----
+app.post("/api/generate-outfit", async (req, res) => {
   try {
-    const { profile = {}, recommendation = {}, mode = "sketch" } = req.body || {};
-    if (!profile.avatarImage) return res.status(400).json({ error: "profile.avatarImage required" });
-    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID/GOOGLE_CLOUD_PROJECT not set for Imagen" });
+    const { profile = {}, wardrobe = [], occasion = "" } = req.body || {};
 
-    const avatarBase64 = profile.avatarImage.split(",")[1] || profile.avatarImage;
-    const top = recommendation.top || {};
-    const bottom = recommendation.bottom || {};
-    const shoes = recommendation.shoes || {};
-    const accessory = recommendation.accessory || {};
+    // Defensive normalization
+    const rawOccasion = (occasion || "").trim();
+    const wardrobeList = (wardrobe || [])
+      .map((w) => `- ${w.color || "unknown"} ${w.name || "unknown"} (${w.category || "Other"})`)
+      .join("\n");
 
-    // Stronger, explicit prompts to avoid extra limbs / wrong posture
-    const sketchPrompt = `
-Fashion designer croquis / pencil sketch: full body standing pose, neutral relaxed stance (arms by side), facing forward, no exaggerated pose.
-Dress the person in: ${top.color || ""} ${top.name || ""}, ${bottom.color || ""} ${bottom.name || ""}, ${shoes.color || ""} ${shoes.name || ""}.
-Keep the subject's face and identity preserved (do not change facial identity), but simplify details into a clean, minimal fashion sketch.
-Style: pencil sketch lines, high detail in clothing silhouettes, flat background, white background, clean croquis proportions, no photorealism.
-Return a single PNG image.
+    // If user provided nothing, force a generic occasion
+    const occasionText = rawOccasion || "casual smart";
+
+    // Instructions to force model to *derive* rules from any free-text occasion.
+    // We also keep a few explicit templates for common cases for clarity.
+    const prompt = `
+You are an expert professional fashion stylist. You MUST follow the rules below precisely and return ONLY a single JSON object with the exact shape specified later.
+
+INPUT SUMMARY:
+- Profile: Gender: ${profile.gender || "unknown"}; Height: ${profile.heightCm ?? "unknown"} cm; Weight: ${profile.weightKg ?? "unknown"} kg; Skin tone: ${profile.skinTone || "unknown"}; Face/vibe: ${profile.facialFeatures || "unknown"}.
+- OCCASION (free-text): "${occasionText}"
+- WARDROBE (use these first where appropriate):
+${wardrobeList || "(empty)"}
+
+INSTRUCTIONS — READ CAREFULLY:
+1. FIRST: Interpret the user's free-text OCCASION and create a short explicit RULES block (1-3 short bullet points) describing exactly what is required for that occasion (tone, formality, forbidden items, preferred colors/fabrics). If the occasion is ambiguous, assume "smart casual" unless user text suggests otherwise.
+2. SECOND: Based on those RULES, produce the outfit JSON below. PRIORITIZE items from WARDROBE: if a WARDROBE item reasonably matches the required piece, set its source to "Wardrobe". If not available, recommend one shopping item and set source to "Shopping".
+3. Keep all descriptions short (1-2 short sentences). Keep reasoning to one sentence explaining *why* the piece fits the occasion and the user.
+4. Keep conservative styling for interviews; athletic for gym; festive for weddings; adapt to whatever the user text requests.
+5. Use a low level of creativity: be practical and realistic.
+6. Return ONLY the JSON object with these keys (no commentary, no extraneous fields):
+
+JSON SCHEMA (exact keys):
+{
+  "top":    { "name":"", "description":"", "color":"", "source":"Wardrobe"|"Shopping", "reasoning":"" },
+  "bottom": { "name":"", "description":"", "color":"", "source":"Wardrobe"|"Shopping", "reasoning":"" },
+  "shoes":  { "name":"", "description":"", "color":"", "source":"Wardrobe"|"Shopping", "reasoning":"" },
+  "accessory": { "name":"", "description":"", "color":"", "source":"Wardrobe"|"Shopping", "reasoning":"" },
+  "hairstyle":"", "hairstyleReasoning":"", "confidenceTip":"", "overallVibe":""
+}
+
+EXAMPLE:
+{
+  "top": { "name":"white shirt", "description":"Crisp white button-up shirt", "color":"white", "source":"Wardrobe", "reasoning":"Classic professional top that pairs with blazers." },
+  "bottom": { "name":"navy trousers", "description":"Tailored navy trousers", "color":"navy", "source":"Shopping", "reasoning":"Neutral professional trousers to complete interview look." },
+  "shoes": { "name":"black loafers", "description":"Simple leather loafers", "color":"black", "source":"Wardrobe", "reasoning":"Professional, comfortable formal shoes." },
+  "accessory": { "name":"simple watch", "description":"Minimal leather-strap watch", "color":"brown", "source":"Shopping", "reasoning":"Adds polish without being flashy." },
+  "hairstyle":"Neat low bun",
+  "hairstyleReasoning":"Keeps hair tidy and professional.",
+  "confidenceTip":"Stand straight and maintain eye contact.",
+  "overallVibe":"Professional and dependable"
+}
+
+Now: produce the JSON only. Do NOT include any explanation or extra text.
 `;
 
-    const realPrompt = `
-Studio photorealistic image: full body, neutral standing pose (arms relaxed by side), even studio lighting, head-to-toe visible, facing camera (slightly three-quarter ok).
-Dress the person in: ${top.color || ""} ${top.name || ""}, ${bottom.color || ""} ${bottom.name || ""}, ${shoes.color || ""} ${shoes.name || ""}.
-Preserve face and identity (do not alter facial identity). Output high quality photorealistic PNG.
-`;
+    const contents = [{ role: "user", parts: [{ text: prompt }] }];
 
-    // Negative prompts to prohibit undesired artifacts
-    const negSketch = "photorealistic, camera, blurred photo, color noise, 3d render, glossy, texture, extra limbs, extra arms, missing limbs, multiple heads, deformity, watermark, text";
-    const negReal = "drawing, sketch, cartoon, anime, painting, extra limbs, multiple arms, multiple legs, distorted anatomy, split body, watermark, text";
+    // Very low randomness for deterministic results; larger token limit
+    const { text } = await callGeminiREST({ contents, generationConfig: { temperature: 0.05, maxOutputTokens: 900 } });
 
-    const promptToUse = mode === "real" ? realPrompt : sketchPrompt;
-    const negativeToUse = mode === "real" ? negReal : negSketch;
+    const cleaned = text.replace(/```json|```/g, "").trim();
 
-    const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
-    const token = await getAccessToken();
-
-    const body = {
-      instances: [
-        {
-          prompt: promptToUse,
-          referenceImages: [
-            {
-              referenceType: "REFERENCE_TYPE_RAW",
-              referenceId: 1,
-              referenceImage: { bytesBase64Encoded: avatarBase64 },
-            },
-          ],
-        },
-      ],
-      parameters: {
-        sampleCount: 1,
-        aspectRatio: "3:4", // match front-end aspect to avoid odd crops
-        negativePrompt: negativeToUse,
-        personGeneration: "allow_adult",
-        outputOptions: { mimeType: "image/png" },
-      },
-    };
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    const json = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      console.error("Imagen predict failed", resp.status, json);
-      return res.status(500).json({ error: "Imagen predict failed", detail: json });
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      // Return the raw text for debugging so you can see what the model returned
+      return res.status(500).json({ error: "Failed to parse outfit JSON", responseText: cleaned });
     }
 
-    const pred = json.predictions?.[0];
-    if (!pred?.bytesBase64Encoded) {
-      console.error("No image returned from Imagen", json);
-      return res.status(500).json({ error: "No image returned from Imagen", detail: json });
+    // Sanity-check shape
+    if (!parsed || typeof parsed !== "object" || !parsed.top || !parsed.shoes) {
+      return res.status(500).json({ error: "Generated JSON missing required fields", responseText: cleaned });
     }
 
-    return res.json({ imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}` });
+    return res.json(parsed);
   } catch (err) {
-    console.error("outfit-image error:", err);
-    return res.status(500).json({ error: err.message || "Outfit image failed", detail: err.meta ?? null });
+    console.error("generate-outfit error:", err);
+    return res.status(500).json({ error: err.message || "Outfit generation failed", detail: err.meta ?? null });
   }
 });
+
 
 // SPA fallback
 app.get("*", (req, res) => {

@@ -226,20 +226,20 @@ const App: React.FC = () => {
         return <History history={history} onBack={() => setView('result')} onClear={handleClearHistory} />;
 
       case 'result':
-        if (!recommendation) return null;
-        return (
-          <ResultDisplay
-            profile={profile}
-            recommendation={recommendation}
-            occasion={occasion}
-            generatedImage={generatedImage}
-            generatedImageReal={generatedImageReal}
-            isGenerating2D={isGenerating2D}
-            onGenerateReal={handleGenerateReal}
-            onBack={() => { setView('profile'); setRecommendation(null); setOccasion(''); setGeneratedImage(null); setGeneratedImageReal(null); }}
-          />
-        );
-
+  if (!recommendation) return null;
+  return (
+    <ResultDisplay 
+      profile={profile}
+      recommendation={recommendation}
+      occasion={occasion}
+      generatedImage2D={generatedImage}
+      generatedImageReal={generatedImageReal}
+      isGenerating2D={isGenerating2D}
+      onGenerateReal={handleGenerateReal}
+      onReset={() => { setView('profile'); setRecommendation(null); setOccasion(''); setGeneratedImage(null); setGeneratedImageReal(null); }} 
+    />
+  );
+        
       case 'profile':
         return <ProfileForm profile={profile} onSave={handleUpdateProfile} onNext={() => setView('wardrobe')} />;
 

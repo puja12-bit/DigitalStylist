@@ -1,4 +1,4 @@
-// server.js - REST Gemini v1 backend + optional Imagen support
+// server.js - REST Gemini v1 backend + Imagen (sketch + real) support
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -14,13 +14,13 @@ app.use(express.static(path.join(__dirname, "dist")));
 
 const PORT = process.env.PORT || 8080;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"; // valid v1 model
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"; // ensure valid
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || "";
 const IMAGEN_LOCATION = process.env.IMAGEN_LOCATION || "us-central1";
 const IMAGEN_MODEL = process.env.IMAGEN_MODEL || "imagen-3.0-capability-001";
 
 console.log("Server starting...");
-console.log("PORT=", PORT, "GEMINI_MODEL=", GEMINI_MODEL, "GEMINI_KEY_PRESENT=", !!GEMINI_API_KEY);
+console.log("PORT=", PORT, "GEMINI_MODEL=", GEMINI_MODEL, "GEMINI_KEY_PRESENT=", !!GEMINI_API_KEY, "PROJECT_ID_PRESENT=", !!PROJECT_ID);
 
 // ----------------- Helper: call Gemini v1 REST -----------------
 async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationConfig = {} }) {
@@ -55,7 +55,6 @@ async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationC
   });
 
   const json = await resp.json();
-
   if (!resp.ok) {
     const msg = `[Gemini REST ${resp.status}] ${JSON.stringify(json)}`;
     const e = new Error(msg);
@@ -66,14 +65,13 @@ async function callGeminiREST({ model = GEMINI_MODEL, contents = [], generationC
   const candidate = json?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
   const text = parts.map((p) => p.text || "").join(" ").trim();
-
   if (!text) throw new Error("Empty text response from Gemini");
-
   return { text, raw: json };
 }
 
 // ----------------- Helper: get access token for Imagen -----------------
 async function getAccessToken() {
+  // Works only on GCP (Cloud Run) with a service account.
   const resp = await fetch(
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
     {
@@ -86,7 +84,6 @@ async function getAccessToken() {
 }
 
 // ----------------- Routes -----------------
-
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // ---- PROFILE ANALYSIS ----
@@ -159,11 +156,6 @@ app.post("/api/analyze-wardrobe-image", async (req, res) => {
 You are a fashion AI that lists clothing items in an image.
 Return ONLY a JSON array where each item has:
 { "name":"short name", "category":"Top|Bottom|Dress|Shoes|Accessory|Outerwear|Other", "color":"primary color" }
-Example:
-[
-  { "name":"white cotton shirt", "category":"Top", "color":"white" },
-  { "name":"dark jeans", "category":"Bottom", "color":"dark blue" }
-]
 Do not add any extra text.
 `;
 
@@ -271,20 +263,40 @@ Do not include any commentary or markdown.
   }
 });
 
-// ---- OUTFIT IMAGE (IMAGEN) - optional, may require enabling Vertex APIs ----
+// ---- OUTFIT IMAGE (IMAGEN) - supports 'sketch' and 'real' ----
 app.post("/api/outfit-image", async (req, res) => {
   try {
     const { profile = {}, recommendation = {}, mode = "sketch" } = req.body || {};
+    // profile.avatarImage should be data URL: data:image/png;base64,...
     if (!profile.avatarImage) return res.status(400).json({ error: "profile.avatarImage required" });
+
+    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID/GOOGLE_CLOUD_PROJECT not set for Imagen" });
 
     const avatarBase64 = profile.avatarImage.split(",")[1] || profile.avatarImage;
 
+    // Build prompt differently for sketch vs real
     const top = recommendation.top || {};
     const bottom = recommendation.bottom || {};
     const shoes = recommendation.shoes || {};
     const accessory = recommendation.accessory || {};
 
-    const editPrompt = `
+    // Sketch style: fashion illustration / pencil / clean lines, model standing front.
+    const sketchPrompt = `
+Create a clean fashion sketch illustration of the PERSON in the provided reference image.
+- Keep the person's face, pose and body proportions identical to the reference.
+- Replace clothing according to the outfit below.
+- Use clean line art and flat colors, minimal shading, high-fashion illustration style (pencil/ink + subtle watercolor).
+- Make the figure centered on a plain white background, full body view from head to toe, no extraneous objects.
+OUTFIT:
+Top: ${top.color || ""} ${top.name || ""}. ${top.description || ""}
+Bottom: ${bottom.color || ""} ${bottom.name || ""}. ${bottom.description || ""}
+Shoes: ${shoes.color || ""} ${shoes.name || ""}. ${shoes.description || ""}
+Accessory: ${accessory.name || ""} ${accessory.description || ""}
+Return only the edited image bytes in the response.
+`;
+
+    // Real style: photorealistic studio edit
+    const realPrompt = `
 Modify only the clothing on this person according to the outfit below.
 Keep face, pose, background, lighting, and identity unchanged.
 OUTFIT:
@@ -292,12 +304,11 @@ Top: ${top.color || ""} ${top.name || ""}. ${top.description || ""}
 Bottom: ${bottom.color || ""} ${bottom.name || ""}. ${bottom.description || ""}
 Shoes: ${shoes.color || ""} ${shoes.name || ""}. ${shoes.description || ""}
 Accessory: ${accessory.name || ""} ${accessory.description || ""}
-STYLE: ${mode === "sketch" ? "High-end fashion illustration, clean lines." : "Photorealistic studio-quality photo."}
+STYLE: Photorealistic studio-quality photo, natural lighting, accurate fabric textures.
 Return image bytes only in the prediction response.
 `;
 
-    // call Vertex Imagen predict
-    if (!PROJECT_ID) return res.status(500).json({ error: "PROJECT_ID/GOOGLE_CLOUD_PROJECT not set for Imagen" });
+    const promptToUse = mode === "real" ? realPrompt : sketchPrompt;
 
     const url = `https://${IMAGEN_LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${IMAGEN_LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
     const token = await getAccessToken();
@@ -305,7 +316,7 @@ Return image bytes only in the prediction response.
     const body = {
       instances: [
         {
-          prompt: editPrompt,
+          prompt: promptToUse,
           referenceImages: [
             {
               referenceType: "REFERENCE_TYPE_RAW",
@@ -318,6 +329,8 @@ Return image bytes only in the prediction response.
       parameters: {
         sampleCount: 1,
         personGeneration: "allow_adult",
+        // For sketch we don't need ultra-large size; 1024 is fine and faster.
+        // Imagen server will choose output; ask for png
         outputOptions: { mimeType: "image/png" },
       },
     };
@@ -338,7 +351,10 @@ Return image bytes only in the prediction response.
     }
 
     const pred = json.predictions?.[0];
-    if (!pred?.bytesBase64Encoded) return res.status(500).json({ error: "No image returned from Imagen", detail: json });
+    if (!pred?.bytesBase64Encoded) {
+      console.error("No bytes in Imagen response", json);
+      return res.status(500).json({ error: "No image returned from Imagen", detail: json });
+    }
 
     return res.json({ imageDataUrl: `data:image/png;base64,${pred.bytesBase64Encoded}` });
   } catch (err) {
